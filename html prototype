@@ -1,0 +1,1320 @@
+// Set up frequency line dragging (vertical)
+            const frequencyLine = document.getElementById('frequencyLine');
+            const spectrogramCanvas = document.getElementById('spectrogramCanvas');
+            const frequencyBar = document.getElementById('freqFill');
+            
+            frequencyLine.addEventListener('mousedown', (e) => {
+                isDraggingFreqLine = true;
+                e.preventDefault();
+            });
+            
+            // Make frequency bar draggable too
+            frequencyBar.addEventListener('mousedown', (e) => {
+                isDraggingFreqBar = true;
+                e.preventDefault();
+            });
+            
+            document.addEventListener('mousemove', (e) => {
+                if (isDraggingFreqLine) {
+                    const canvas = document.getElementById('spectrogramCanvas');
+                    const rect = canvas.getBoundingClientRect();
+                    const y = e.clientY - rect.top; // Use Y coordinate for vertical movement
+                    
+                    // Constrain to canvas bounds
+                    const constrainedY = Math.max(0, Math.min(y, rect.height));
+                    
+                    // Convert position to frequency (11kHz at top, 1kHz at bottom)
+                    const freqPercent = 1 - (constrainedY / rect.height);
+                    optimalFrequency = 1000 + freqPercent * 10000;
+                    
+                    updateFrequencyDisplay();
+                }
+                
+                if (isDraggingFreqBar) {
+                    const freqBarElement = document.getElementById('freqFill').parentElement;
+                    const rect = freqBarElement.getBoundingClientRect();
+                    const x = e.clientX - rect.left; // Use X coordinate for horizontal movement
+                    
+                    // Constrain to bar bounds
+                    const constrainedX = Math.max(0, Math.min(x, rect.width));
+                    
+                    // Convert position to frequency (1kHz to 11kHz)
+                    const freqPercent = constrainedX / rect.width;
+                    optimalFrequency = 1000 + freqPercent * 10000;
+                    
+                    updateFrequencyDisplay();
+                }
+            });
+            
+            document.addEventListener('mouseup', () => {
+                if (isDraggingFreqLine || isDraggingFreqBar) {
+                    isDraggingFreqLine = false;
+                    isDraggingFreqBar = false;
+                    log(`Manually selected frequency: ${Math.round(optimalFrequency)} Hz`, 'info');
+                    
+                    // Switch to manual mode
+                    if (!isManualFreqMode) {
+                        isManualFreqMode = true;
+                        document.getElementById('freqMode').textContent = 'Manual';
+                        document.getElementById('freqModeBtn').textContent = 'Auto Select';
+                    }
+                }
+            });
+            
+            // Also allow clicking on spectrogram to set frequency
+            spectrogramCanvas.addEventListener('click', (e) => {
+                if (!isDraggingFreqLine && !isDraggingFreqBar) {
+                    const rect = spectrogramCanvas.getBoundingClientRect();
+                    const y = e.clientY - rect.top;
+                    
+                    // Convert position to frequency (11kHz at top, 1kHz at bottom)
+                    const freqPercent = 1 - (y / rect.height);
+                    optimalFrequency = 1000 + freqPercent * 10000;
+                    
+                    updateFrequencyDisplay();
+                    
+                    // Switch to manual mode
+                    if (!isManualFreqMode) {
+                        isManualFreqMode = true;
+                        document.getElementById('freqMode').textContent = 'Manual';
+                        document.getElementById('freqModeBtn').textContent = 'Auto Select';
+                    }
+                    
+                    log(`Clicked to select frequency: ${Math.round(optimalFrequency)} Hz`, 'info');
+                }
+            });
+            
+            // Allow clicking on frequency bar too
+            document.getElementById('freqFill').parentElement.addEventListener('click', (e) => {
+                if (!isDraggingFreqBar) {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    
+                    // Convert position to frequency
+                    const freqPercent = x / rect.width;
+                    optimalFrequency = 1000 + freqPercent * 10000;
+                    
+                    updateFrequencyDisplay();
+                    
+                    // Switch to manual mode
+                    if (!isManualFreqMode) {
+                        isManualFreqMode = true;
+                        document.getElementById('freqMode').textContent = 'Manual';
+                        document.getElementById('freqModeBtn').textContent = 'Auto Select';
+                    }
+                    
+                    log(`Clicked frequency bar: ${Math.round(optimalFrequency)} Hz`, 'info');
+                }
+            });
+            
+            // Initialize frequency line position
+            updateFrequencyLinePosition();<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sonic File Transfer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #fff;
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 3rem;
+            margin-bottom: 10px;
+            text-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
+
+        .header p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+        }
+
+        .mode-selector {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .mode-btn {
+            padding: 15px 30px;
+            border: none;
+            border-radius: 12px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            min-width: 150px;
+        }
+
+        .mode-btn.sender {
+            background: linear-gradient(45deg, #ff6b6b, #ee5a52);
+            color: white;
+        }
+
+        .mode-btn.listener {
+            background: linear-gradient(45deg, #4ecdc4, #44a08d);
+            color: white;
+        }
+
+        .mode-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+        }
+
+        .mode-btn.active {
+            transform: scale(1.05);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.4);
+        }
+
+        .panel {
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+
+        .status {
+            text-align: center;
+            font-size: 1.3rem;
+            margin-bottom: 20px;
+            padding: 15px;
+            border-radius: 10px;
+            background: rgba(0,0,0,0.2);
+        }
+
+        .frequency-display {
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .frequency-bar {
+            width: 100%;
+            height: 40px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 20px;
+            overflow: hidden;
+            position: relative;
+            margin: 10px 0;
+        }
+
+        .frequency-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00ff88, #00cc6a);
+            border-radius: 20px;
+            transition: width 0.3s ease;
+        }
+
+        .frequency-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-weight: bold;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+        }
+
+        .file-input-area {
+            border: 2px dashed rgba(255,255,255,0.5);
+            border-radius: 15px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 20px 0;
+        }
+
+        .file-input-area:hover {
+            border-color: rgba(255,255,255,0.8);
+            background: rgba(255,255,255,0.05);
+        }
+
+        .file-input-area.dragover {
+            border-color: #4ecdc4;
+            background: rgba(78, 205, 196, 0.1);
+        }
+
+        .btn {
+            background: linear-gradient(45deg, #ff6b6b, #ee5a52);
+            border: none;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            margin: 5px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(0,0,0,0.3);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4ecdc4, #44a08d);
+            border-radius: 10px;
+            transition: width 0.3s ease;
+        }
+
+        .visualizer {
+            width: 100%;
+            height: 100px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 10px;
+            margin: 20px 0;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .wave {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(78, 205, 196, 0.5), transparent);
+            animation: wave 2s linear infinite;
+        }
+
+        @keyframes wave {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .spectrogram-container {
+            position: relative;
+            margin: 20px 0;
+            background: rgba(0,0,0,0.3);
+            border-radius: 10px;
+            padding: 20px;
+        }
+
+        .spectrogram {
+            width: 100%;
+            height: 200px;
+            background: #000;
+            border-radius: 8px;
+            position: relative;
+            overflow: hidden;
+            cursor: crosshair;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+
+        .frequency-line {
+            position: absolute;
+            width: 3px;
+            height: 100%;
+            background: #ff6b6b;
+            box-shadow: 0 0 10px rgba(255, 107, 107, 0.8), 0 0 20px rgba(255, 107, 107, 0.4);
+            cursor: ew-resize;
+            z-index: 10;
+            transition: left 0.1s ease;
+        }
+
+        .frequency-line::before {
+            content: '';
+            position: absolute;
+            top: -5px;
+            left: -7px;
+            width: 17px;
+            height: 17px;
+            background: #ff6b6b;
+            border-radius: 50%;
+            box-shadow: 0 0 10px rgba(255, 107, 107, 0.8);
+        }
+
+        .frequency-line::after {
+            content: '';
+            position: absolute;
+            bottom: -5px;
+            left: -7px;
+            width: 17px;
+            height: 17px;
+            background: #ff6b6b;
+            border-radius: 50%;
+            box-shadow: 0 0 10px rgba(255, 107, 107, 0.8);
+        }
+
+        .spectrogram-labels {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
+
+        .spectrogram-scale {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            position: absolute;
+            left: -40px;
+            top: 0;
+            height: 100%;
+            font-size: 0.8rem;
+            opacity: 0.8;
+            padding: 5px 0;
+        }
+
+        .scale-container {
+            position: relative;
+            display: flex;
+            align-items: flex-start;
+        }
+
+        .intensity-legend {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-top: 15px;
+            gap: 15px;
+            font-size: 0.9rem;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 15px;
+            border-radius: 3px;
+        }
+
+        .frequency-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 15px;
+            padding: 10px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 8px;
+        }
+
+        .calibration-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+            gap: 10px;
+            margin: 20px 0;
+        }
+
+        .freq-bar {
+            height: 40px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 5px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .freq-level {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            background: linear-gradient(to top, #ff6b6b, #ffeb3b, #4caf50);
+            transition: height 0.2s ease;
+        }
+
+        .freq-label {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 0.8rem;
+            font-weight: bold;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+        }
+
+        .file-info {
+            background: rgba(0,0,0,0.2);
+            padding: 15px;
+            border-radius: 10px;
+            margin: 10px 0;
+        }
+
+        .log {
+            background: rgba(0,0,0,0.3);
+            padding: 15px;
+            border-radius: 10px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 0.9rem;
+            margin-top: 20px;
+        }
+
+        .log-entry {
+            margin: 5px 0;
+            padding: 2px 0;
+        }
+
+        .log-entry.success { color: #4caf50; }
+        .log-entry.error { color: #ff6b6b; }
+        .log-entry.info { color: #2196f3; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔊 Sonic File Transfer</h1>
+            <p>Transfer files using only sound waves - no cables, WiFi, or Bluetooth required!</p>
+        </div>
+
+        <div class="mode-selector">
+            <button class="mode-btn sender" onclick="setMode('sender')">📤 Sender</button>
+            <button class="mode-btn listener" onclick="setMode('listener')">📥 Listener</button>
+        </div>
+
+        <div id="calibrationPanel" class="panel">
+            <h2>🎯 Environment Calibration</h2>
+            <div class="status" id="calibrationStatus">Click "Start Calibration" to find the best frequency for your environment</div>
+            <button class="btn" onclick="startCalibration()" id="calibrateBtn">Start Calibration</button>
+            
+            <div class="spectrogram-container">
+                <h3>Environment Noise Profile</h3>
+                <div class="scale-container">
+                    <div class="spectrogram-scale">
+                        <span>11kHz</span>
+                        <span>9kHz</span>
+                        <span>7kHz</span>
+                        <span>5kHz</span>
+                        <span>3kHz</span>
+                        <span>1kHz</span>
+                    </div>
+                    <canvas class="spectrogram" id="spectrogramCanvas" width="800" height="300"></canvas>
+                    <div class="frequency-line" id="frequencyLine"></div>
+                </div>
+                <div class="spectrogram-labels">
+                    <span>0s</span>
+                    <span>1s</span>
+                    <span>2s</span>
+                    <span>3s</span>
+                    <span>4s</span>
+                    <span>5s</span>
+                    <span>6s</span>
+                </div>
+                <div class="intensity-legend">
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #000080;"></div>
+                        <span>Quiet</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #008000;"></div>
+                        <span>Low</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #FFFF00;"></div>
+                        <span>Medium</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #FF0000;"></div>
+                        <span>High Noise</span>
+                    </div>
+                </div>
+                <div class="frequency-info">
+                    <div>
+                        <strong>Selected Frequency:</strong> 
+                        <span id="selectedFreq">5500 Hz</span>
+                    </div>
+                    <div>
+                        <strong>Auto/Manual:</strong> 
+                        <span id="freqMode">Manual</span>
+                        <button class="btn" onclick="toggleFreqMode()" id="freqModeBtn" style="margin-left: 10px; padding: 5px 10px; font-size: 0.9rem;">Auto Select</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="calibration-grid" id="calibrationGrid"></div>
+            <div class="frequency-display">
+                <div>Optimal Frequency: <span id="optimalFreq">Not calibrated</span></div>
+                <div class="frequency-bar">
+                    <div class="frequency-fill" id="freqFill" style="width: 45%">
+                        <div class="frequency-handle" id="freqHandle"></div>
+                    </div>
+                    <div class="frequency-text" id="freqText">5500 Hz</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="senderPanel" class="panel hidden">
+            <h2>📤 Send File</h2>
+            <div class="status" id="senderStatus">Select a file to send</div>
+            
+            <div class="file-input-area" onclick="document.getElementById('fileInput').click()" 
+                 ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)">
+                <input type="file" id="fileInput" style="display: none;" onchange="handleFileSelect(event)">
+                <div>📁 Click here or drag & drop a file</div>
+                <div style="font-size: 0.9rem; opacity: 0.8; margin-top: 10px;">Max recommended size: 1MB</div>
+            </div>
+
+            <div id="fileInfo" class="file-info hidden">
+                <div><strong>File:</strong> <span id="fileName"></span></div>
+                <div><strong>Size:</strong> <span id="fileSize"></span></div>
+                <div><strong>Estimated time:</strong> <span id="estimatedTime"></span></div>
+            </div>
+
+            <button class="btn" onclick="startSending()" id="sendBtn" disabled>🚀 Start Transmission</button>
+            
+            <div id="sendProgress" class="hidden">
+                <div>Progress: <span id="progressText">0%</span></div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <div class="visualizer hidden" id="senderVisualizer">
+                <div class="wave"></div>
+            </div>
+        </div>
+
+        <div id="listenerPanel" class="panel hidden">
+            <h2>📥 Receive File</h2>
+            <div class="status" id="listenerStatus">Waiting for transmission...</div>
+            
+            <button class="btn" onclick="startListening()" id="listenBtn">🎧 Start Listening</button>
+            <button class="btn" onclick="stopListening()" id="stopListenBtn" disabled>⏹️ Stop Listening</button>
+            
+            <div id="receiveProgress" class="hidden">
+                <div>Receiving: <span id="receiveProgressText">0%</span></div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="receiveProgressFill" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <div class="visualizer hidden" id="listenerVisualizer">
+                <div class="wave"></div>
+            </div>
+
+            <div id="receivedFile" class="file-info hidden">
+                <div><strong>Received File:</strong> <span id="receivedFileName"></span></div>
+                <div><strong>Size:</strong> <span id="receivedFileSize"></span></div>
+                <button class="btn" onclick="downloadReceived()" id="downloadBtn">💾 Download File</button>
+            </div>
+        </div>
+
+        <div class="log" id="log">
+            <div class="log-entry info">Welcome to Sonic File Transfer! Select Sender or Listener mode to begin.</div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let audioContext;
+        let mediaStream;
+        let analyser;
+        let currentMode = null;
+        let optimalFrequency = 5500; // Default to middle frequency
+        let isCalibrated = false;
+        let selectedFile = null;
+        let receivedData = null;
+        let isListening = false;
+        let isSending = false;
+        let isDraggingFreqLine = false;
+        let isDraggingFreqHandle = false;
+        let isManualFreqMode = true;
+        let calibrationData = []; // Store aggregated calibration data
+
+        // Frequency ranges for testing (in Hz)
+        const FREQ_RANGES = [
+            { min: 1000, max: 2000, label: '1-2kHz' },
+            { min: 2000, max: 3000, label: '2-3kHz' },
+            { min: 3000, max: 4000, label: '3-4kHz' },
+            { min: 4000, max: 5000, label: '4-5kHz' },
+            { min: 5000, max: 6000, label: '5-6kHz' },
+            { min: 6000, max: 7000, label: '6-7kHz' },
+            { min: 7000, max: 8000, label: '7-8kHz' },
+            { min: 8000, max: 9000, label: '8-9kHz' },
+            { min: 9000, max: 10000, label: '9-10kHz' },
+            { min: 10000, max: 11000, label: '10-11kHz' },
+        ];
+
+        const DATA_RATE = 100; // bytes per second (very conservative for demo)
+
+        function log(message, type = 'info') {
+            const logElement = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `${new Date().toLocaleTimeString()}: ${message}`;
+            logElement.appendChild(entry);
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+
+        function setMode(mode) {
+            currentMode = mode;
+            document.querySelectorAll('.mode-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelector(`.mode-btn.${mode}`).classList.add('active');
+            
+            document.getElementById('senderPanel').classList.toggle('hidden', mode !== 'sender');
+            document.getElementById('listenerPanel').classList.toggle('hidden', mode !== 'listener');
+            
+            log(`Switched to ${mode} mode`, 'info');
+        }
+
+        async function initAudio() {
+            try {
+                if (!audioContext) {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                
+                if (!mediaStream) {
+                    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    analyser = audioContext.createAnalyser();
+                    const source = audioContext.createMediaStreamSource(mediaStream);
+                    source.connect(analyser);
+                    analyser.fftSize = 2048;
+                }
+                
+                return true;
+            } catch (error) {
+                log(`Error accessing microphone: ${error.message}`, 'error');
+                return false;
+            }
+        }
+
+        async function startCalibration() {
+            if (!await initAudio()) return;
+            
+            document.getElementById('calibrateBtn').disabled = true;
+            document.getElementById('calibrationStatus').textContent = 'Calibrating... analyzing background noise levels';
+            
+            // Clear previous calibration data
+            calibrationData = [];
+            
+            // Clear spectrogram
+            const canvas = document.getElementById('spectrogramCanvas');
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Create frequency bars
+            const grid = document.getElementById('calibrationGrid');
+            grid.innerHTML = '';
+            
+            FREQ_RANGES.forEach((range, index) => {
+                const bar = document.createElement('div');
+                bar.className = 'freq-bar';
+                bar.innerHTML = `
+                    <div class="freq-level" id="freqLevel${index}"></div>
+                    <div class="freq-label">${range.label}</div>
+                `;
+                grid.appendChild(bar);
+            });
+            
+            log('Starting frequency calibration...', 'info');
+            
+            // Analyze frequencies for 6 seconds
+            const noiseLevels = new Array(FREQ_RANGES.length).fill(0);
+            const analysisTime = 6000;
+            const sampleInterval = 100;
+            const samples = analysisTime / sampleInterval;
+            let sampleCount = 0;
+            
+            const interval = setInterval(() => {
+                const bufferLength = analyser.frequencyBinCount;
+                const dataArray = new Uint8Array(bufferLength);
+                analyser.getByteFrequencyData(dataArray);
+                
+                // Store this sample for spectrogram
+                calibrationData.push([...dataArray]);
+                
+                // Analyze each frequency range
+                FREQ_RANGES.forEach((range, index) => {
+                    const startBin = Math.floor(range.min * bufferLength / (audioContext.sampleRate / 2));
+                    const endBin = Math.floor(range.max * bufferLength / (audioContext.sampleRate / 2));
+                    
+                    let sum = 0;
+                    for (let i = startBin; i < endBin; i++) {
+                        sum += dataArray[i];
+                    }
+                    const average = sum / (endBin - startBin);
+                    noiseLevels[index] += average / samples;
+                    
+                    // Update visual
+                    const level = document.getElementById(`freqLevel${index}`);
+                    if (level) {
+                        level.style.height = `${(average / 255) * 100}%`;
+                    }
+                });
+                
+                // Update progress on spectrogram
+                drawCalibrationProgress(sampleCount / samples);
+                
+                sampleCount++;
+                if (sampleCount >= samples) {
+                    clearInterval(interval);
+                    completeCalibration(noiseLevels);
+                }
+            }, sampleInterval);
+        }
+
+        function drawCalibrationProgress(progress) {
+            const canvas = document.getElementById('spectrogramCanvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Draw a simple progress indicator
+            const progressWidth = progress * canvas.width;
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+            ctx.fillRect(0, canvas.height - 5, progressWidth, 5);
+        }
+
+        function drawAggregatedSpectrogram() {
+            const canvas = document.getElementById('spectrogramCanvas');
+            const ctx = canvas.getContext('2d');
+            const bufferLength = analyser.frequencyBinCount;
+            
+            // Clear canvas
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            if (calibrationData.length === 0) return;
+            
+            // Create aggregated view - average over time for each frequency
+            const aggregatedSpectrum = new Array(bufferLength).fill(0);
+            
+            // Average all samples
+            for (let sample of calibrationData) {
+                for (let i = 0; i < bufferLength; i++) {
+                    aggregatedSpectrum[i] += sample[i] / calibrationData.length;
+                }
+            }
+            
+            // Draw the aggregated spectrum as a time-series
+            for (let x = 0; x < canvas.width; x++) {
+                const timeProgress = x / canvas.width;
+                const sampleIndex = Math.floor(timeProgress * calibrationData.length);
+                
+                if (sampleIndex < calibrationData.length) {
+                    const sample = calibrationData[sampleIndex];
+                    
+                    for (let y = 0; y < canvas.height; y++) {
+                        // Map y to frequency (11kHz at top, 1kHz at bottom)
+                        const freq = 11000 - (y / canvas.height) * 10000;
+                        const freqBin = Math.floor(freq * bufferLength / (audioContext.sampleRate / 2));
+                        
+                        const amplitude = sample[freqBin] || 0;
+                        const intensity = amplitude / 255;
+                        
+                        // Color mapping: blue (low) -> green (medium) -> yellow -> red (high)
+                        let r, g, b;
+                        if (intensity < 0.25) {
+                            r = 0;
+                            g = 0;
+                            b = Math.floor(intensity * 4 * 128) + 128;
+                        } else if (intensity < 0.5) {
+                            r = 0;
+                            g = Math.floor((intensity - 0.25) * 4 * 255);
+                            b = 255;
+                        } else if (intensity < 0.75) {
+                            r = Math.floor((intensity - 0.5) * 4 * 255);
+                            g = 255;
+                            b = 255 - Math.floor((intensity - 0.5) * 4 * 255);
+                        } else {
+                            r = 255;
+                            g = 255 - Math.floor((intensity - 0.75) * 4 * 255);
+                            b = 0;
+                        }
+                        
+                        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+                        ctx.fillRect(x, y, 1, 1);
+                    }
+                }
+            }
+        }
+
+        function updateFrequencyDisplay() {
+            updateFrequencyLinePosition();
+            
+            // Update frequency bar
+            const percentage = ((optimalFrequency - 1000) / 10000) * 100;
+            document.getElementById('freqFill').style.width = `${percentage}%`;
+            document.getElementById('freqText').textContent = `${Math.round(optimalFrequency)} Hz`;
+            document.getElementById('optimalFreq').textContent = `${Math.round(optimalFrequency)} Hz`;
+            document.getElementById('selectedFreq').textContent = `${Math.round(optimalFrequency)} Hz`;
+        }
+
+        function updateFrequencyLinePosition() {
+            const canvas = document.getElementById('spectrogramCanvas');
+            const line = document.getElementById('frequencyLine');
+            
+            // Map frequency (1kHz to 11kHz) to vertical position (bottom to top)
+            const freqPercent = (optimalFrequency - 1000) / 10000;
+            const positionY = (1 - freqPercent) * canvas.offsetHeight; // Invert because 11kHz is at top
+            
+            line.style.top = `${positionY}px`;
+            line.style.left = '0px';
+            line.style.width = '100%';
+            line.style.height = '3px';
+        }
+
+        function toggleFreqMode() {
+            isManualFreqMode = !isManualFreqMode;
+            document.getElementById('freqMode').textContent = isManualFreqMode ? 'Manual' : 'Auto';
+            document.getElementById('freqModeBtn').textContent = isManualFreqMode ? 'Auto Select' : 'Manual Select';
+            
+            if (!isManualFreqMode && isCalibrated) {
+                // Switch back to auto-detected frequency
+                log('Switched to auto-detected optimal frequency', 'info');
+            } else {
+                log('Switched to manual frequency selection', 'info');
+            }
+        }
+
+        function completeCalibration(noiseLevels) {
+            // Find the frequency range with lowest noise
+            let minNoise = Math.min(...noiseLevels);
+            let bestFreqIndex = noiseLevels.indexOf(minNoise);
+            
+            // Choose a frequency in the middle of the best range
+            const bestRange = FREQ_RANGES[bestFreqIndex];
+            const autoOptimalFrequency = (bestRange.min + bestRange.max) / 2;
+            
+            // Only update if in auto mode
+            if (!isManualFreqMode) {
+                optimalFrequency = autoOptimalFrequency;
+                updateFrequencyLinePosition();
+            }
+            
+            // Draw the final aggregated spectrogram
+            drawAggregatedSpectrogram();
+            
+            isCalibrated = true;
+            document.getElementById('calibrateBtn').disabled = false;
+            document.getElementById('calibrationStatus').textContent = `Calibration complete! Analyzed ${calibrationData.length} samples over 6 seconds`;
+            document.getElementById('optimalFreq').textContent = `${Math.round(optimalFrequency)} Hz`;
+            
+            // Update frequency bar
+            const percentage = ((optimalFrequency - 1000) / 10000) * 100;
+            document.getElementById('freqFill').style.width = `${percentage}%`;
+            document.getElementById('freqText').textContent = `${Math.round(optimalFrequency)} Hz`;
+            
+            log(`Calibration complete: using frequency ${Math.round(optimalFrequency)} Hz (${isManualFreqMode ? 'manual' : 'auto from ' + bestRange.label})`, 'success');
+            
+            // Enable send/listen buttons if in appropriate mode
+            updateButtonStates();
+        }
+
+        function updateButtonStates() {
+            if (isCalibrated) {
+                if (currentMode === 'sender' && selectedFile) {
+                    document.getElementById('sendBtn').disabled = false;
+                }
+                if (currentMode === 'listener') {
+                    document.getElementById('listenBtn').disabled = false;
+                }
+            }
+        }
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (file) {
+                selectedFile = file;
+                document.getElementById('fileName').textContent = file.name;
+                document.getElementById('fileSize').textContent = formatFileSize(file.size);
+                document.getElementById('estimatedTime').textContent = formatTime(file.size / DATA_RATE);
+                document.getElementById('fileInfo').classList.remove('hidden');
+                document.getElementById('senderStatus').textContent = 'File ready to send';
+                updateButtonStates();
+                log(`File selected: ${file.name} (${formatFileSize(file.size)})`, 'info');
+            }
+        }
+
+        function handleDrop(event) {
+            event.preventDefault();
+            event.target.classList.remove('dragover');
+            const file = event.dataTransfer.files[0];
+            if (file) {
+                selectedFile = file;
+                const input = document.getElementById('fileInput');
+                input.files = event.dataTransfer.files;
+                handleFileSelect({ target: input });
+            }
+        }
+
+        function handleDragOver(event) {
+            event.preventDefault();
+            event.target.classList.add('dragover');
+        }
+
+        function handleDragLeave(event) {
+            event.target.classList.remove('dragover');
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+
+        function formatTime(seconds) {
+            if (seconds < 60) return `${Math.round(seconds)}s`;
+            const minutes = Math.floor(seconds / 60);
+            const remainingSeconds = Math.round(seconds % 60);
+            return `${minutes}m ${remainingSeconds}s`;
+        }
+
+        async function startSending() {
+            if (!selectedFile || !isCalibrated) return;
+            
+            isSending = true;
+            document.getElementById('sendBtn').disabled = true;
+            document.getElementById('senderStatus').textContent = 'Preparing transmission...';
+            document.getElementById('sendProgress').classList.remove('hidden');
+            document.getElementById('senderVisualizer').classList.remove('hidden');
+            
+            log('Starting file transmission...', 'info');
+            
+            // Read file as binary data
+            const reader = new FileReader();
+            reader.onload = async function(e) {
+                const arrayBuffer = e.target.result;
+                const uint8Array = new Uint8Array(arrayBuffer);
+                
+                // Create transmission packet
+                const header = {
+                    filename: selectedFile.name,
+                    size: selectedFile.size,
+                    checksum: calculateChecksum(uint8Array)
+                };
+                
+                await transmitData(header, uint8Array);
+            };
+            reader.readAsArrayBuffer(selectedFile);
+        }
+
+        function calculateChecksum(data) {
+            let checksum = 0;
+            for (let i = 0; i < data.length; i++) {
+                checksum ^= data[i];
+            }
+            return checksum;
+        }
+
+        async function transmitData(header, data) {
+            try {
+                // Send calibration tone for 1 second
+                document.getElementById('senderStatus').textContent = 'Sending calibration signal...';
+                await playTone(optimalFrequency, 1000);
+                
+                // Send header
+                document.getElementById('senderStatus').textContent = 'Sending file information...';
+                await sendPacket('HEADER:' + JSON.stringify(header));
+                
+                // Send data in chunks
+                const chunkSize = 50; // bytes per chunk
+                const totalChunks = Math.ceil(data.length / chunkSize);
+                
+                for (let i = 0; i < totalChunks; i++) {
+                    const start = i * chunkSize;
+                    const end = Math.min(start + chunkSize, data.length);
+                    const chunk = data.slice(start, end);
+                    
+                    const progress = ((i + 1) / totalChunks) * 100;
+                    document.getElementById('progressText').textContent = `${Math.round(progress)}%`;
+                    document.getElementById('progressFill').style.width = `${progress}%`;
+                    document.getElementById('senderStatus').textContent = `Sending chunk ${i + 1}/${totalChunks}...`;
+                    
+                    // Convert chunk to base64 for transmission
+                    const base64Chunk = btoa(String.fromCharCode.apply(null, chunk));
+                    await sendPacket(`DATA:${i}:${base64Chunk}`);
+                    
+                    // Small delay between chunks
+                    await new Promise(resolve => setTimeout(resolve, 50));
+                }
+                
+                // Send end signal
+                document.getElementById('senderStatus').textContent = 'Sending completion signal...';
+                await sendPacket('END:TRANSMISSION_COMPLETE');
+                
+                // Completion
+                document.getElementById('senderStatus').textContent = 'Transmission complete!';
+                document.getElementById('progressText').textContent = '100%';
+                document.getElementById('progressFill').style.width = '100%';
+                
+                log('File transmission completed successfully!', 'success');
+                
+                isSending = false;
+                document.getElementById('sendBtn').disabled = false;
+                
+            } catch (error) {
+                log(`Transmission error: ${error.message}`, 'error');
+                isSending = false;
+                document.getElementById('sendBtn').disabled = false;
+            }
+        }
+
+        async function sendPacket(message) {
+            // Simple FSK encoding - this is a simplified version
+            const encoded = encodeMessage(message);
+            await playTone(optimalFrequency, 100); // Start tone
+            
+            for (let i = 0; i < encoded.length; i++) {
+                const bit = encoded[i];
+                const freq = bit === '1' ? optimalFrequency + 50 : optimalFrequency - 50;
+                await playTone(freq, 50); // 50ms per bit
+            }
+            
+            await playTone(optimalFrequency, 100); // End tone
+        }
+
+        function encodeMessage(message) {
+            // Convert message to binary
+            let binary = '';
+            for (let i = 0; i < message.length; i++) {
+                binary += message.charCodeAt(i).toString(2).padStart(8, '0');
+            }
+            return binary;
+        }
+
+        async function playTone(frequency, duration) {
+            return new Promise((resolve) => {
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+                
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+                
+                oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime);
+                gainNode.gain.setValueAtTime(0.1, audioContext.currentTime); // Low volume
+                
+                oscillator.start();
+                oscillator.stop(audioContext.currentTime + duration / 1000);
+                
+                setTimeout(resolve, duration);
+            });
+        }
+
+        async function startListening() {
+            if (!isCalibrated || !await initAudio()) return;
+            
+            isListening = true;
+            receivedData = null;
+            document.getElementById('listenBtn').disabled = true;
+            document.getElementById('stopListenBtn').disabled = false;
+            document.getElementById('listenerStatus').textContent = 'Listening for transmission...';
+            document.getElementById('listenerVisualizer').classList.remove('hidden');
+            
+            log('Started listening for transmissions...', 'info');
+            
+            // Start listening loop
+            listenForTransmission();
+        }
+
+        function stopListening() {
+            isListening = false;
+            document.getElementById('listenBtn').disabled = false;
+            document.getElementById('stopListenBtn').disabled = true;
+            document.getElementById('listenerStatus').textContent = 'Stopped listening';
+            document.getElementById('listenerVisualizer').classList.add('hidden');
+            
+            log('Stopped listening', 'info');
+        }
+
+        function listenForTransmission() {
+            if (!isListening) return;
+            
+            // This is a simplified version - in reality, you'd need sophisticated
+            // signal processing to decode the FSK modulated audio
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            analyser.getByteFrequencyData(dataArray);
+            
+            // Check for signal at optimal frequency
+            const freqBin = Math.floor(optimalFrequency * bufferLength / (audioContext.sampleRate / 2));
+            const signalLevel = dataArray[freqBin];
+            
+            if (signalLevel > 100) { // Threshold for signal detection
+                document.getElementById('listenerStatus').textContent = 'Signal detected! Decoding...';
+                log('Signal detected, attempting to decode...', 'info');
+                
+                // Simulate receiving a file
+                setTimeout(() => {
+                    simulateFileReception();
+                }, 2000);
+            } else {
+                // Continue listening
+                setTimeout(listenForTransmission, 100);
+            }
+        }
+
+        function simulateFileReception() {
+            // This simulates receiving the demo file
+            const demoContent = "Hello from Sonic File Transfer!\n\nThis is a demonstration of transferring files using only sound waves.\n\nPretty cool, right?";
+            const blob = new Blob([demoContent], { type: 'text/plain' });
+            
+            // Simulate progress
+            let progress = 0;
+            const progressInterval = setInterval(() => {
+                progress += 10;
+                document.getElementById('receiveProgressText').textContent = `${progress}%`;
+                document.getElementById('receiveProgressFill').style.width = `${progress}%`;
+                document.getElementById('receiveProgress').classList.remove('hidden');
+                
+                if (progress >= 100) {
+                    clearInterval(progressInterval);
+                    completeReception(blob, 'demo.txt');
+                }
+            }, 200);
+        }
+
+        function completeReception(blob, filename) {
+            receivedData = blob;
+            document.getElementById('listenerStatus').textContent = 'File received successfully!';
+            document.getElementById('receivedFileName').textContent = filename;
+            document.getElementById('receivedFileSize').textContent = formatFileSize(blob.size);
+            document.getElementById('receivedFile').classList.remove('hidden');
+            
+            log(`File received: ${filename} (${formatFileSize(blob.size)})`, 'success');
+            
+            // Stop listening
+            stopListening();
+        }
+
+        function downloadReceived() {
+            if (!receivedData) return;
+            
+            const url = URL.createObjectURL(receivedData);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = document.getElementById('receivedFileName').textContent;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            log('File downloaded successfully!', 'success');
+        }
+
+        // Initialize the app
+        window.addEventListener('load', () => {
+            log('Sonic File Transfer loaded! Select a mode to begin.', 'info');
+            
+            // Set up frequency line dragging
+            const frequencyLine = document.getElementById('frequencyLine');
+            const spectrogramCanvas = document.getElementById('spectrogramCanvas');
+            
+            frequencyLine.addEventListener('mousedown', (e) => {
+                isDraggingFreqLine = true;
+                e.preventDefault();
+            });
+            
+            document.addEventListener('mousemove', (e) => {
+                if (isDraggingFreqLine) {
+                    const canvas = document.getElementById('spectrogramCanvas');
+                    const rect = canvas.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    
+                    // Constrain to canvas bounds
+                    const constrainedX = Math.max(0, Math.min(x, rect.width));
+                    
+                    // Convert position to frequency (1kHz to 11kHz)
+                    const freqPercent = constrainedX / rect.width;
+                    optimalFrequency = 1000 + freqPercent * 10000;
+                    
+                    // Update visuals
+                    updateFrequencyLinePosition();
+                    
+                    // Update frequency bar
+                    const percentage = ((optimalFrequency - 1000) / 10000) * 100;
+                    document.getElementById('freqFill').style.width = `${percentage}%`;
+                    document.getElementById('freqText').textContent = `${Math.round(optimalFrequency)} Hz`;
+                    document.getElementById('optimalFreq').textContent = `${Math.round(optimalFrequency)} Hz`;
+                    
+                    // Switch to manual mode
+                    if (!isManualFreqMode) {
+                        isManualFreqMode = true;
+                        document.getElementById('freqMode').textContent = 'Manual';
+                        document.getElementById('freqModeBtn').textContent = 'Auto Select';
+                    }
+                }
+            });
+            
+            document.addEventListener('mouseup', () => {
+                if (isDraggingFreqLine) {
+                    isDraggingFreqLine = false;
+                    log(`Manually selected frequency: ${Math.round(optimalFrequency)} Hz`, 'info');
+                }
+            });
+            
+            // Also allow clicking on spectrogram to set frequency
+            spectrogramCanvas.addEventListener('click', (e) => {
+                if (!isDraggingFreqLine) {
+                    const rect = spectrogramCanvas.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    
+                    // Convert position to frequency
+                    const freqPercent = x / rect.width;
+                    optimalFrequency = 1000 + freqPercent * 10000;
+                    
+                    // Update visuals
+                    updateFrequencyLinePosition();
+                    
+                    // Update frequency bar
+                    const percentage = ((optimalFrequency - 1000) / 10000) * 100;
+                    document.getElementById('freqFill').style.width = `${percentage}%`;
+                    document.getElementById('freqText').textContent = `${Math.round(optimalFrequency)} Hz`;
+                    document.getElementById('optimalFreq').textContent = `${Math.round(optimalFrequency)} Hz`;
+                    
+                    // Switch to manual mode
+                    if (!isManualFreqMode) {
+                        isManualFreqMode = true;
+                        document.getElementById('freqMode').textContent = 'Manual';
+                        document.getElementById('freqModeBtn').textContent = 'Auto Select';
+                    }
+                    
+                    log(`Clicked to select frequency: ${Math.round(optimalFrequency)} Hz`, 'info');
+                }
+            });
+            
+            // Initialize frequency line position
+            updateFrequencyLinePosition();
+        });
+    </script>
+</body>
+</html>
