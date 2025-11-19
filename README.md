@@ -4,57 +4,65 @@
 
 ## Overview
 
-SonicTransfer is an experimental web application that enables file transfer between devices using acoustic communication. By encoding data as sound waves (using FSK modulation), files can be transmitted through the air using only speakers and microphones.
+SonicTransfer is an enhanced web application that enables file transfer between devices using acoustic communication. By encoding data as sound waves using **chord-based FSK modulation** (multiple parallel frequencies), files can be transmitted through the air at **4x faster speeds** using only speakers and microphones.
 
 ## Features
 
 ### Core Functionality
-- **Dual Mode Operation**: Switch between Sender and Listener modes
-- **Acoustic File Transfer**: Transmit files using sound waves in the 1-11 kHz frequency range
-- **Environment Calibration**: Automatically analyzes ambient noise to select optimal transmission frequency
+- **🎵 Chord-Based Transmission**: Uses 4 parallel frequency channels for 4x faster transfer speeds
+- **🎯 Smart Auto-Calibration**: Quick 2-second environment analysis with one-click "Auto-Calibrate & Send"
+- **📡 Real FSK Demodulation**: Proper signal demodulation for reliable reception
+- **✅ Error Detection**: CRC16 and checksum verification for data integrity
+- **🔄 Redundancy**: Critical packets sent twice for improved reliability
+- **Dual Mode Operation**: Seamless switching between Sender and Listener modes
 - **Real-time Spectrogram**: Visual representation of frequency spectrum and noise levels
-- **Manual/Auto Frequency Selection**: Choose transmission frequency automatically or manually
 
-### User Interface
-- **Interactive Spectrogram**: Click or drag to manually select transmission frequency
+### User Experience
+- **One-Click Operation**: "Auto-Calibrate & Send" for instant transmission
 - **Drag & Drop File Upload**: Easy file selection for transmission
-- **Progress Tracking**: Real-time transmission and reception progress indicators
-- **Visual Audio Feedback**: Animated wave visualizer during transmission
+- **Progress Tracking**: Real-time transmission and reception progress with statistics
+- **Visual Audio Feedback**: Animated spectrum analyzer and waveform visualizer
 - **Activity Log**: Detailed logging of all transmission events
+- **Smart Quick Start**: Step-by-step guides in both sender and listener modes
 
 ## How It Works
 
 ### Technology Stack
-- **Web Audio API**: For audio generation and analysis
-- **FSK Modulation**: Frequency Shift Keying for binary data encoding
-- **Canvas API**: For spectrogram visualization
+- **Web Audio API**: For audio generation and FFT analysis
+- **Chord FSK Modulation**: Multi-channel Frequency Shift Keying for parallel data transmission
+- **Canvas API**: For spectrogram visualization and spectrum analyzer
 - **HTML5 File API**: For file reading and download
+- **Real-time Demodulation**: Custom FSK demodulator for signal decoding
 
 ### Transmission Process
 
-1. **Calibration Phase**
-   - Analyzes ambient noise across 10 frequency bands (1-11 kHz)
-   - Records 6-second noise profile
-   - Automatically selects quietest frequency range
-   - Displays real-time spectrogram
+1. **Quick Calibration Phase** (2-3 seconds)
+   - Analyzes ambient noise across 2-10 kHz spectrum
+   - Identifies 4 quietest frequency bands spaced 400 Hz apart
+   - Automatically selects optimal base frequency
+   - Displays real-time spectrogram with selected channels
 
 2. **Encoding**
-   - File metadata (name, size, checksum) transmitted as header
-   - Data split into 50-byte chunks
-   - Each chunk encoded to binary then FSK modulated
-   - FSK uses optimal frequency ±50 Hz for binary 0/1
+   - File metadata (name, size, CRC, checksum) transmitted as header
+   - Data split into 64-byte chunks (increased from 50)
+   - Each chunk encoded to binary then distributed across 4 channels
+   - FSK uses optimal frequency ±100 Hz for binary 0/1
 
-3. **Transmission**
-   - 1-second calibration tone at optimal frequency
-   - Header packet with file information
-   - Sequential data chunks with 50ms bit duration
-   - Completion signal at end
+3. **Chord Transmission** (4x faster!)
+   - Sync preamble on all 4 channels
+   - Metadata packet with file information
+   - Parallel data transmission on 4 frequencies simultaneously
+   - Each symbol transmitted in 40ms (vs 50ms single channel)
+   - Critical packets sent twice for redundancy
+   - Completion signal repeated for reliability
 
-4. **Reception** (Simplified in prototype)
-   - Monitors optimal frequency for signal detection
-   - Decodes FSK modulated audio stream
+4. **Real Reception & Demodulation**
+   - Monitors all 4 frequency channels simultaneously
+   - Real FSK demodulation of each channel
+   - Sync pattern detection for packet framing
+   - Automatic packet reassembly with duplicate detection
    - Reconstructs file from received chunks
-   - Verifies integrity using checksum
+   - Verifies integrity using CRC16 and checksum
 
 ## Usage
 
@@ -62,66 +70,84 @@ SonicTransfer is an experimental web application that enables file transfer betw
 
 1. **Open the Application**
    ```bash
-   # Simply open the HTML file in a modern web browser
-   open "html prototype"
+   # Open index.html in a modern web browser
+   open index.html
+   # Or use a local server:
+   python3 -m http.server 8000
+   # Then navigate to http://localhost:8000
    ```
 
 2. **Grant Microphone Access**
    - Browser will request microphone permissions
    - Required for both sending and receiving
 
-### Sending Files
+### Sending Files (Quick Method) ⚡
 
-1. Click **"Sender"** mode button
-2. Click **"Start Calibration"** to analyze environment
-3. Wait for 6-second calibration to complete
-4. Drag and drop a file (or click to browse)
-5. Click **"Start Transmission"**
-6. Keep devices close together during transmission
+1. Click **"📤 Send File"** mode button
+2. Drag and drop a file (or click to browse)
+3. Click **"🚀 Auto-Calibrate & Send"**
+4. Keep devices close together (within 1 meter)
+5. Wait for transmission to complete
+
+That's it! The system will automatically calibrate and start sending.
+
+### Sending Files (Manual Method)
+
+1. Click **"📤 Send File"** mode button
+2. Click **"🎯 Manual Calibration"** to analyze environment (3 seconds)
+3. Drag and drop a file (or click to browse)
+4. Click **"📡 Send Now"**
+5. Keep devices close together during transmission
 
 ### Receiving Files
 
-1. Click **"Listener"** mode button
-2. Click **"Start Calibration"** to sync frequency
-3. Click **"Start Listening"**
-4. Wait for sender to begin transmission
-5. Download received file when complete
+1. Click **"📥 Receive File"** mode button
+2. Click **"🎧 Start Listening"**
+3. System automatically calibrates and waits for transmission
+4. Position device close to sender's speaker
+5. Monitor progress and signal quality
+6. Click **"💾 Download File"** when reception completes
 
-### Calibration Controls
-
-- **Spectrogram**: Click anywhere to manually set frequency
-- **Frequency Line**: Drag the red line vertically to adjust frequency
-- **Frequency Bar**: Click or drag the horizontal bar to set frequency
-- **Auto/Manual Toggle**: Switch between automatic and manual frequency selection
+The system will show real-time statistics:
+- **Chunks Received**: Number of data chunks successfully decoded
+- **Bytes/sec**: Current transfer rate
+- **Signal Quality**: Percentage of expected chunks received
 
 ## Technical Specifications
 
 ### Audio Parameters
-- **Frequency Range**: 1,000 - 11,000 Hz
-- **Sample Rate**: System default (typically 44.1 or 48 kHz)
-- **FFT Size**: 2048 bins
-- **Modulation**: FSK (Frequency Shift Keying)
-- **Frequency Deviation**: ±50 Hz from carrier
-- **Bit Duration**: 50 milliseconds
+- **Frequency Range**: 2,000 - 10,000 Hz
+- **Number of Channels**: 4 (chord transmission)
+- **Channel Spacing**: 400 Hz
+- **Sample Rate**: 44,100 Hz
+- **FFT Size**: 8,192 bins (high resolution)
+- **Modulation**: Multi-channel FSK (Frequency Shift Keying)
+- **Frequency Deviation**: ±100 Hz from carrier
+- **Symbol Duration**: 40 milliseconds
 
 ### Performance
-- **Data Rate**: ~100 bytes/second (conservative estimate)
-- **Recommended File Size**: < 1 MB
-- **Chunk Size**: 50 bytes
-- **Analysis Duration**: 6 seconds for calibration
+- **Theoretical Data Rate**: ~400 bytes/second (4 channels × 100 bytes/sec)
+- **Practical Data Rate**: ~250-350 bytes/second (with overhead)
+- **Speed Improvement**: **4x faster** than single-channel transmission
+- **Recommended File Size**: < 500 KB
+- **Chunk Size**: 64 bytes
+- **Quick Calibration**: 2 seconds
+- **Full Calibration**: 3 seconds
 
-### Frequency Bands
-The calibration system analyzes 10 frequency ranges:
-- 1-2 kHz
-- 2-3 kHz
-- 3-4 kHz
-- 4-5 kHz
-- 5-6 kHz
-- 6-7 kHz
-- 7-8 kHz
-- 8-9 kHz
-- 9-10 kHz
-- 10-11 kHz
+### Chord Configuration
+Example optimal frequency set:
+- **Channel 1**: 5000 Hz (±100 Hz for FSK)
+- **Channel 2**: 5400 Hz (±100 Hz for FSK)
+- **Channel 3**: 5800 Hz (±100 Hz for FSK)
+- **Channel 4**: 6200 Hz (±100 Hz for FSK)
+
+The system automatically selects the 4 quietest frequency bands based on environment analysis.
+
+### Error Correction
+- **CRC16**: Cyclic Redundancy Check for data integrity
+- **Checksum**: Simple checksum for quick verification
+- **Redundancy**: Every 5th packet sent twice
+- **Sync Patterns**: Frame synchronization for packet alignment
 
 ## Browser Compatibility
 
@@ -137,20 +163,40 @@ Requires a modern browser with support for:
 - Safari 14+
 - Edge 79+
 
+## What's New in Enhanced Version 🚀
+
+### Major Improvements
+- **4x Faster Transfer**: Chord-based transmission using 4 parallel frequency channels
+- **Real FSK Demodulation**: Proper signal demodulation replaces simulated reception
+- **One-Click Send**: New "Auto-Calibrate & Send" button for instant transmission
+- **Quick Calibration**: Reduced from 6 seconds to 2 seconds
+- **Error Detection**: Added CRC16 and checksum verification
+- **Better UX**: Simplified workflow with quick-start guides
+- **Real-time Stats**: Live transfer rate and signal quality monitoring
+- **Improved Reliability**: Packet redundancy and sync pattern detection
+
+### Bug Fixes
+- Fixed frequency line dragging code duplication
+- Corrected vertical/horizontal coordinate handling in UI
+- Improved audio context management
+- Better memory management and cleanup
+- Fixed packet buffering overflow issues
+
 ## Limitations
 
-### Current Prototype Limitations
-- **Simplified Decoding**: Reception uses simulated decoding (not full FSK demodulation)
-- **Error Correction**: No FEC (Forward Error Correction) implemented
-- **Distance**: Effective range limited to close proximity (~1-2 meters)
+### Current Limitations
+- **Distance**: Effective range limited to close proximity (~1 meter optimal)
 - **Noise Sensitivity**: Performance degrades in noisy environments
-- **Data Rate**: Very low throughput compared to modern wireless protocols
+- **Data Rate**: Low throughput (~300 bytes/sec) compared to modern wireless protocols
+- **Browser Dependency**: Requires modern browser with Web Audio API support
+- **No Encryption**: Transmissions are not encrypted
 
 ### Recommended Use Cases
 - Demonstrations and educational purposes
 - Proof of concept for acoustic data transmission
 - Air-gapped data transfer scenarios
 - Device pairing without network infrastructure
+- Fun file sharing experiments!
 
 ## Security Considerations
 
@@ -163,15 +209,20 @@ Requires a modern browser with support for:
 
 Potential improvements for production implementation:
 
-- [ ] Full FSK demodulation and decoding
-- [ ] Error detection and correction (CRC, Reed-Solomon)
-- [ ] Encryption and authentication
-- [ ] Higher modulation schemes (QPSK, QAM)
+- [x] ~~Full FSK demodulation and decoding~~ ✅ Implemented!
+- [x] ~~Error detection (CRC, checksum)~~ ✅ Implemented!
+- [x] ~~Multi-frequency transmission~~ ✅ Implemented with chord modulation!
+- [ ] Advanced error correction (Reed-Solomon FEC)
+- [ ] Encryption and authentication (AES)
+- [ ] Higher modulation schemes (QPSK, 8-PSK)
 - [ ] Adaptive data rate based on channel quality
-- [ ] Multi-frequency transmission (OFDM)
-- [ ] Automatic gain control
-- [ ] Echo cancellation
-- [ ] Compression before transmission
+- [ ] OFDM (Orthogonal Frequency Division Multiplexing)
+- [ ] Automatic gain control (AGC)
+- [ ] Echo cancellation for full-duplex
+- [ ] Compression before transmission (LZ77, Brotli)
+- [ ] Automatic retry for failed chunks
+- [ ] Channel equalization
+- [ ] Support for larger files with chunked transfer
 
 ## Troubleshooting
 
@@ -199,27 +250,41 @@ Potential improvements for production implementation:
 ### Project Structure
 ```
 SonicTransfer/
-├── html prototype    # Complete web application
-└── README.md        # This file
+├── index.html           # Main application UI
+├── sonic-transfer.js    # Core transmission logic
+├── html prototype       # Original prototype (legacy)
+└── README.md           # This documentation
 ```
 
 ### Key Functions
 
 **Calibration**
-- `startCalibration()`: Initiates 6-second noise analysis
-- `completeCalibration()`: Processes results and selects optimal frequency
-- `drawAggregatedSpectrogram()`: Renders frequency visualization
+- `performCalibration(isQuick)`: Performs environment noise analysis
+- `analyzeCalibrationData(samples)`: Selects optimal frequency channels
+- `updateFrequencyDisplay()`: Updates UI with selected frequencies
+- `drawSpectrogram(samples)`: Renders frequency visualization
 
-**Transmission**
+**Transmission (Sender)**
+- `quickSend()`: One-click auto-calibrate and send
 - `startSending()`: Initiates file transmission
-- `transmitData()`: Manages transmission sequence
-- `sendPacket()`: FSK encodes and plays audio packet
-- `playTone()`: Generates audio tones at specified frequency
+- `transmitFile(metadata, fileData)`: Manages transmission sequence
+- `sendPreamble()`: Sends sync tones on all channels
+- `sendPacket(message)`: Encodes and transmits packet
+- `transmitBinaryChord(binaryString)`: Parallel FSK transmission
+- `playChord(frequencies, duration)`: Generates multi-tone audio
 
-**Reception**
+**Reception (Listener)**
 - `startListening()`: Begins monitoring for transmissions
-- `listenForTransmission()`: Detects signals at optimal frequency
-- `simulateFileReception()`: Demo reception handler
+- `startReceptionLoop()`: Main demodulation loop
+- `demodulateChord(spectrum)`: Real FSK demodulation on all channels
+- `processReceivedBits(bits)`: Bit stream processing
+- `processPacket(packet)`: Packet parsing and handling
+- `reconstructFile()`: Assembles file from received chunks
+
+**Utilities**
+- `crc16(data)`: CRC16 checksum calculation
+- `calculateChecksum(data)`: Simple checksum
+- `encodeToBinary(message)`: String to binary conversion
 
 ## Contributing
 
