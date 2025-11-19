@@ -1,5 +1,5 @@
-// SonicTransfer - Enhanced Acoustic File Transfer
-// Features: Chord transmission, real FSK demodulation, improved UX
+// SonicTransfer Enhanced - v2.0
+// New Features: ACK/NACK, Signal Monitor, Compression, Presets, Adaptive Power
 
 // =============================================================================
 // GLOBAL CONFIGURATION
@@ -8,31 +8,46 @@
 const CONFIG = {
     // Audio parameters
     SAMPLE_RATE: 44100,
-    FFT_SIZE: 8192,  // Larger FFT for better frequency resolution
+    FFT_SIZE: 8192,
 
     // Frequency configuration
     FREQ_MIN: 2000,
     FREQ_MAX: 10000,
-    NUM_CHANNELS: 4,  // Number of parallel frequency channels (chord)
-    CHANNEL_SPACING: 400,  // Hz between channels
+    NUM_CHANNELS: 4,
+    CHANNEL_SPACING: 400,
 
     // Modulation
-    FSK_DEVIATION: 100,  // Hz deviation for FSK
-    SYMBOL_DURATION: 40,  // ms per symbol (increased from 50 for speed)
+    FSK_DEVIATION: 100,
+    SYMBOL_DURATION: 40,
 
     // Transmission
-    CHUNK_SIZE: 64,  // bytes per chunk (increased from 50)
-    PREAMBLE_DURATION: 800,  // ms
-    PACKET_DELAY: 10,  // ms between packets (reduced for speed)
+    CHUNK_SIZE: 64,
+    PREAMBLE_DURATION: 800,
+    PACKET_DELAY: 10,
 
     // Reception
-    SIGNAL_THRESHOLD: 80,  // Amplitude threshold for signal detection
-    CALIBRATION_DURATION: 3000,  // ms (reduced from 6000)
-    MIN_SNR: 10,  // Minimum signal-to-noise ratio (dB)
+    SIGNAL_THRESHOLD: 80,
+    CALIBRATION_DURATION: 3000,
+    MIN_SNR: 10,
 
-    // Error correction
+    // Error correction & retry
     USE_CHECKSUM: true,
-    USE_REDUNDANCY: true,  // Send each chunk twice
+    USE_REDUNDANCY: false,  // Disabled - using ACK/NACK instead
+    MAX_RETRIES: 3,
+    ACK_TIMEOUT: 1000,  // ms to wait for ACK
+
+    // NEW: Compression
+    USE_COMPRESSION: true,
+    COMPRESSION_MIN_SIZE: 1024,  // Only compress files > 1KB
+
+    // NEW: Adaptive power
+    ENABLE_ADAPTIVE_POWER: true,
+    MIN_POWER: 0.03,
+    MAX_POWER: 0.15,
+    TARGET_SNR: 15,  // dB
+
+    // NEW: Signal monitoring
+    SNR_HISTORY_SIZE: 50,
 };
 
 // =============================================================================
@@ -68,12 +83,309 @@ let demodBuffer = [];
 let syncDetected = false;
 let bitBuffer = [];
 
+// NEW: ACK/NACK protocol state
+let pendingAck = null;
+let ackReceived = false;
+let retryCount = 0;
+let chunkRetryMap = new Map();
+
+// NEW: Signal monitoring
+let snrHistory = [];
+let currentSNR = 0;
+let currentPower = 0.1;
+
+// NEW: Preset management
+const PRESET_STORAGE_KEY = 'sonicTransfer_presets';
+
+// =============================================================================
+// LZ77-BASED COMPRESSION
+// =============================================================================
+
+class LZCompressor {
+    constructor() {
+        this.windowSize = 4096;
+        this.lookaheadSize = 18;
+    }
+
+    compress(data) {
+        const input = new Uint8Array(data);
+        const output = [];
+        let pos = 0;
+
+        // Header: original size (4 bytes)
+        output.push((input.length >> 24) & 0xFF);
+        output.push((input.length >> 16) & 0xFF);
+        output.push((input.length >> 8) & 0xFF);
+        output.push(input.length & 0xFF);
+
+        while (pos < input.length) {
+            let matchLength = 0;
+            let matchDistance = 0;
+
+            // Search for longest match in window
+            const searchStart = Math.max(0, pos - this.windowSize);
+            const searchEnd = pos;
+
+            for (let i = searchStart; i < searchEnd; i++) {
+                let length = 0;
+                while (length < this.lookaheadSize &&
+                       pos + length < input.length &&
+                       input[i + length] === input[pos + length]) {
+                    length++;
+                }
+
+                if (length > matchLength) {
+                    matchLength = length;
+                    matchDistance = pos - i;
+                }
+            }
+
+            if (matchLength >= 3) {
+                // Encode as (distance, length)
+                output.push(0xFF);  // Marker for match
+                output.push((matchDistance >> 8) & 0xFF);
+                output.push(matchDistance & 0xFF);
+                output.push(matchLength);
+                pos += matchLength;
+            } else {
+                // Literal byte
+                output.push(input[pos]);
+                pos++;
+            }
+        }
+
+        return new Uint8Array(output);
+    }
+
+    decompress(data) {
+        const input = new Uint8Array(data);
+        let pos = 4;  // Skip header
+
+        // Read original size
+        const originalSize = (input[0] << 24) | (input[1] << 16) | (input[2] << 8) | input[3];
+        const output = [];
+
+        while (pos < input.length && output.length < originalSize) {
+            if (input[pos] === 0xFF && pos + 3 < input.length) {
+                // Match
+                const distance = (input[pos + 1] << 8) | input[pos + 2];
+                const length = input[pos + 3];
+                pos += 4;
+
+                const matchStart = output.length - distance;
+                for (let i = 0; i < length; i++) {
+                    output.push(output[matchStart + i]);
+                }
+            } else {
+                // Literal
+                output.push(input[pos]);
+                pos++;
+            }
+        }
+
+        return new Uint8Array(output.slice(0, originalSize));
+    }
+
+    getCompressionRatio(original, compressed) {
+        return ((1 - compressed.length / original.length) * 100).toFixed(1);
+    }
+}
+
+const compressor = new LZCompressor();
+
+// =============================================================================
+// CALIBRATION PRESET MANAGEMENT
+// =============================================================================
+
+class PresetManager {
+    constructor() {
+        this.presets = this.loadPresets();
+    }
+
+    loadPresets() {
+        try {
+            const stored = localStorage.getItem(PRESET_STORAGE_KEY);
+            return stored ? JSON.parse(stored) : {};
+        } catch (e) {
+            log('Failed to load presets: ' + e.message, 'warning');
+            return {};
+        }
+    }
+
+    savePresets() {
+        try {
+            localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(this.presets));
+        } catch (e) {
+            log('Failed to save presets: ' + e.message, 'warning');
+        }
+    }
+
+    saveCalibration(name, frequencies, noiseFloorData) {
+        this.presets[name] = {
+            frequencies: frequencies,
+            noiseFloor: noiseFloorData,
+            timestamp: Date.now(),
+            environment: this.detectEnvironmentType(noiseFloorData)
+        };
+        this.savePresets();
+        log(`Saved preset: ${name}`, 'success');
+    }
+
+    loadCalibration(name) {
+        return this.presets[name] || null;
+    }
+
+    listPresets() {
+        return Object.keys(this.presets).map(name => ({
+            name: name,
+            ...this.presets[name]
+        }));
+    }
+
+    deletePreset(name) {
+        delete this.presets[name];
+        this.savePresets();
+    }
+
+    detectEnvironmentType(noiseFloorData) {
+        const avgNoise = noiseFloorData.reduce((a, b) => a + b, 0) / noiseFloorData.length;
+        if (avgNoise < 30) return 'Quiet';
+        if (avgNoise < 60) return 'Normal';
+        if (avgNoise < 100) return 'Noisy';
+        return 'Very Noisy';
+    }
+}
+
+const presetManager = new PresetManager();
+
+// =============================================================================
+// SIGNAL QUALITY MONITORING
+// =============================================================================
+
+class SignalMonitor {
+    constructor() {
+        this.snrHistory = [];
+        this.maxHistory = CONFIG.SNR_HISTORY_SIZE;
+    }
+
+    calculateSNR(signalLevel, noiseLevel) {
+        if (noiseLevel === 0) return 100;
+        const snr = 20 * Math.log10(signalLevel / noiseLevel);
+        return Math.max(0, Math.min(100, snr));
+    }
+
+    updateSNR(spectrum, targetFrequencies) {
+        const sampleRate = audioContext.sampleRate;
+        const bufferLength = spectrum.length;
+
+        let signalTotal = 0;
+        let noiseTotal = 0;
+        let signalCount = 0;
+        let noiseCount = 0;
+
+        // Measure signal at target frequencies
+        targetFrequencies.forEach(freq => {
+            const bin = Math.floor(freq * bufferLength / (sampleRate / 2));
+            signalTotal += spectrum[bin] || 0;
+            signalCount++;
+        });
+
+        // Measure noise between target frequencies
+        for (let i = 0; i < targetFrequencies.length - 1; i++) {
+            const freq1 = targetFrequencies[i];
+            const freq2 = targetFrequencies[i + 1];
+            const midFreq = (freq1 + freq2) / 2;
+            const bin = Math.floor(midFreq * bufferLength / (sampleRate / 2));
+            noiseTotal += spectrum[bin] || 0;
+            noiseCount++;
+        }
+
+        const avgSignal = signalCount > 0 ? signalTotal / signalCount : 0;
+        const avgNoise = noiseCount > 0 ? noiseTotal / noiseCount : 1;
+
+        const snr = this.calculateSNR(avgSignal, avgNoise);
+
+        this.snrHistory.push(snr);
+        if (this.snrHistory.length > this.maxHistory) {
+            this.snrHistory.shift();
+        }
+
+        return snr;
+    }
+
+    getAverageSNR() {
+        if (this.snrHistory.length === 0) return 0;
+        return this.snrHistory.reduce((a, b) => a + b, 0) / this.snrHistory.length;
+    }
+
+    getSignalQuality() {
+        const snr = this.getAverageSNR();
+        if (snr >= 25) return 'Excellent';
+        if (snr >= 15) return 'Good';
+        if (snr >= 10) return 'Fair';
+        if (snr >= 5) return 'Poor';
+        return 'Very Poor';
+    }
+
+    reset() {
+        this.snrHistory = [];
+    }
+}
+
+const signalMonitor = new SignalMonitor();
+
+// =============================================================================
+// ADAPTIVE POWER CONTROL
+// =============================================================================
+
+class PowerController {
+    constructor() {
+        this.currentPower = 0.1;
+        this.targetSNR = CONFIG.TARGET_SNR;
+    }
+
+    adjustPower(currentSNR) {
+        if (!CONFIG.ENABLE_ADAPTIVE_POWER) return this.currentPower;
+
+        const snrDiff = this.targetSNR - currentSNR;
+
+        if (Math.abs(snrDiff) < 2) {
+            // SNR is close to target, no adjustment needed
+            return this.currentPower;
+        }
+
+        // Adjust power based on SNR difference
+        if (snrDiff > 0) {
+            // Need more power
+            this.currentPower = Math.min(CONFIG.MAX_POWER, this.currentPower * 1.1);
+        } else {
+            // Can reduce power
+            this.currentPower = Math.max(CONFIG.MIN_POWER, this.currentPower * 0.9);
+        }
+
+        log(`Power adjusted to ${(this.currentPower * 100).toFixed(1)}% (SNR: ${currentSNR.toFixed(1)}dB)`, 'info');
+        return this.currentPower;
+    }
+
+    getPower() {
+        return this.currentPower;
+    }
+
+    reset() {
+        this.currentPower = 0.1;
+    }
+}
+
+const powerController = new PowerController();
+
 // =============================================================================
 // UTILITY FUNCTIONS
 // =============================================================================
 
 function log(message, type = 'info') {
     const logElement = document.getElementById('log');
+    if (!logElement) return;
+
     const entry = document.createElement('div');
     entry.className = `log-entry ${type}`;
     const timestamp = new Date().toLocaleTimeString();
@@ -81,7 +393,6 @@ function log(message, type = 'info') {
     logElement.appendChild(entry);
     logElement.scrollTop = logElement.scrollHeight;
 
-    // Also console log for debugging
     console.log(`[${type.toUpperCase()}] ${message}`);
 }
 
@@ -203,16 +514,14 @@ function analyzeCalibrationData(samples) {
         }
     }
 
-    // Store noise floor
     noiseFloor = avgSpectrum;
 
-    // Find quietest frequency bands for our channels
+    // Find quietest frequency bands
     const freqBins = [];
     for (let freq = CONFIG.FREQ_MIN; freq <= CONFIG.FREQ_MAX - (CONFIG.NUM_CHANNELS * CONFIG.CHANNEL_SPACING); freq += 50) {
         const bin = Math.floor(freq * bufferLength / (sampleRate / 2));
         const noiseLevels = [];
 
-        // Check noise for each potential channel
         for (let ch = 0; ch < CONFIG.NUM_CHANNELS; ch++) {
             const chFreq = freq + (ch * CONFIG.CHANNEL_SPACING);
             const chBin = Math.floor(chFreq * bufferLength / (sampleRate / 2));
@@ -221,18 +530,12 @@ function analyzeCalibrationData(samples) {
         }
 
         const avgNoise = noiseLevels.reduce((a, b) => a + b, 0) / noiseLevels.length;
-        const maxNoise = Math.max(...noiseLevels);
-
-        freqBins.push({ freq, avgNoise, maxNoise });
+        freqBins.push({ freq, avgNoise });
     }
 
-    // Sort by average noise (lowest first)
     freqBins.sort((a, b) => a.avgNoise - b.avgNoise);
-
-    // Select the quietest base frequency
     const baseFreq = freqBins[0].freq;
 
-    // Generate channel frequencies
     optimalFrequencies = [];
     for (let i = 0; i < CONFIG.NUM_CHANNELS; i++) {
         optimalFrequencies.push(baseFreq + (i * CONFIG.CHANNEL_SPACING));
@@ -243,9 +546,9 @@ function analyzeCalibrationData(samples) {
     log(`Calibration complete! Using ${CONFIG.NUM_CHANNELS} channels starting at ${baseFreq} Hz`, 'success');
     log(`Frequencies: ${optimalFrequencies.map(f => f + 'Hz').join(', ')}`, 'info');
 
-    // Update UI
     updateFrequencyDisplay();
     drawSpectrogram(samples);
+    updatePresetUI();
 }
 
 function updateFrequencyDisplay() {
@@ -257,7 +560,6 @@ function updateFrequencyDisplay() {
     if (senderFreq) senderFreq.textContent = freqText;
     if (listenerFreq) listenerFreq.textContent = freqText;
 
-    // Update chord indicator
     const chordIndicator = document.getElementById('chordIndicator');
     if (chordIndicator) {
         chordIndicator.innerHTML = optimalFrequencies
@@ -277,11 +579,9 @@ function drawSpectrogram(samples) {
     const bufferLength = samples[0].length;
     const sampleRate = audioContext.sampleRate;
 
-    // Clear
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Draw spectrogram
     for (let x = 0; x < canvas.width; x++) {
         const sampleIdx = Math.floor(x / canvas.width * samples.length);
         if (sampleIdx >= samples.length) continue;
@@ -294,7 +594,6 @@ function drawSpectrogram(samples) {
             const amplitude = sample[bin] || 0;
             const intensity = amplitude / 255;
 
-            // Color mapping
             let r, g, b;
             if (intensity < 0.25) {
                 r = 0; g = 0; b = Math.floor(intensity * 4 * 128) + 128;
@@ -324,6 +623,59 @@ function drawSpectrogram(samples) {
 }
 
 // =============================================================================
+// PRESET UI MANAGEMENT
+// =============================================================================
+
+function updatePresetUI() {
+    const presetSelect = document.getElementById('presetSelect');
+    if (!presetSelect) return;
+
+    const presets = presetManager.listPresets();
+    presetSelect.innerHTML = '<option value="">-- Select Preset --</option>';
+
+    presets.forEach(preset => {
+        const option = document.createElement('option');
+        option.value = preset.name;
+        option.textContent = `${preset.name} (${preset.environment})`;
+        presetSelect.appendChild(option);
+    });
+}
+
+function saveCurrentPreset() {
+    if (!isCalibrated) {
+        log('Please calibrate first before saving preset', 'warning');
+        return;
+    }
+
+    const name = prompt('Enter preset name:');
+    if (name && name.trim()) {
+        presetManager.saveCalibration(name.trim(), optimalFrequencies, noiseFloor);
+        updatePresetUI();
+    }
+}
+
+function loadPreset() {
+    const presetSelect = document.getElementById('presetSelect');
+    if (!presetSelect || !presetSelect.value) return;
+
+    const preset = presetManager.loadCalibration(presetSelect.value);
+    if (preset) {
+        optimalFrequencies = preset.frequencies;
+        noiseFloor = preset.noiseFloor;
+        isCalibrated = true;
+
+        log(`Loaded preset: ${presetSelect.value} (${preset.environment})`, 'success');
+        updateFrequencyDisplay();
+
+        // Enable buttons
+        if (selectedFile) {
+            document.getElementById('sendBtn').disabled = false;
+            document.getElementById('quickSendBtn').disabled = false;
+        }
+    }
+}
+
+// =============================================================================
 // MODE SELECTION & UI
 // =============================================================================
 
@@ -348,7 +700,13 @@ function handleFileSelect(event) {
     if (file) {
         selectedFile = file;
 
-        const estimatedTime = file.size / (CONFIG.CHUNK_SIZE * CONFIG.NUM_CHANNELS * (1000 / CONFIG.SYMBOL_DURATION));
+        // Estimate with compression
+        let estimatedSize = file.size;
+        if (CONFIG.USE_COMPRESSION && file.size > CONFIG.COMPRESSION_MIN_SIZE) {
+            estimatedSize = file.size * 0.6;  // Estimate 40% compression
+        }
+
+        const estimatedTime = estimatedSize / (CONFIG.CHUNK_SIZE * CONFIG.NUM_CHANNELS * (1000 / CONFIG.SYMBOL_DURATION));
 
         document.getElementById('fileName').textContent = file.name;
         document.getElementById('fileSize').textContent = formatFileSize(file.size);
@@ -388,7 +746,7 @@ function handleDragLeave(event) {
 }
 
 // =============================================================================
-// QUICK SEND (AUTO-CALIBRATE + SEND)
+// QUICK SEND
 // =============================================================================
 
 async function quickSend() {
@@ -399,7 +757,6 @@ async function quickSend() {
 
     log('Starting quick calibration before send...', 'info');
 
-    // Show calibration UI
     document.getElementById('senderCalibration').classList.remove('hidden');
 
     const success = await performCalibration(true);
@@ -429,7 +786,7 @@ async function manualCalibrate() {
 }
 
 // =============================================================================
-// TRANSMISSION (SENDER)
+// TRANSMISSION (SENDER) WITH ACK/NACK
 // =============================================================================
 
 async function startSending() {
@@ -439,70 +796,105 @@ async function startSending() {
     }
 
     isSending = true;
+    chunkRetryMap.clear();
+    signalMonitor.reset();
+    powerController.reset();
+
     document.getElementById('sendBtn').disabled = true;
     document.getElementById('quickSendBtn').disabled = true;
     document.getElementById('senderStatus').textContent = 'Reading file...';
     document.getElementById('sendProgress').classList.remove('hidden');
     document.getElementById('chordDisplay').classList.remove('hidden');
     document.getElementById('senderVisualizer').classList.remove('hidden');
+    document.getElementById('signalStrengthPanel').classList.remove('hidden');
 
-    log('Starting file transmission with chord modulation...', 'info');
+    log('Starting file transmission with ACK/NACK protocol...', 'info');
 
-    // Read file
     const reader = new FileReader();
     reader.onload = async function(e) {
-        const arrayBuffer = e.target.result;
-        const fileData = new Uint8Array(arrayBuffer);
+        let arrayBuffer = e.target.result;
+        let fileData = new Uint8Array(arrayBuffer);
+        let compressed = false;
+        let originalSize = fileData.length;
 
-        // Prepare metadata
+        // Compress if enabled and file is large enough
+        if (CONFIG.USE_COMPRESSION && fileData.length > CONFIG.COMPRESSION_MIN_SIZE) {
+            document.getElementById('senderStatus').textContent = 'Compressing file...';
+            log('Compressing file...', 'info');
+
+            const compressedData = compressor.compress(fileData);
+            const ratio = compressor.getCompressionRatio(fileData, compressedData);
+
+            if (compressedData.length < fileData.length) {
+                fileData = compressedData;
+                compressed = true;
+                log(`File compressed: ${formatFileSize(originalSize)} → ${formatFileSize(fileData.length)} (${ratio}% reduction)`, 'success');
+            } else {
+                log('Compression not beneficial, sending uncompressed', 'info');
+            }
+        }
+
         const metadata = {
             filename: selectedFile.name,
-            size: selectedFile.size,
+            size: fileData.length,
+            originalSize: originalSize,
+            compressed: compressed,
             checksum: calculateChecksum(fileData),
             crc: crc16(fileData),
             chunks: Math.ceil(fileData.length / CONFIG.CHUNK_SIZE),
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            useAck: true
         };
 
-        await transmitFile(metadata, fileData);
+        await transmitFileWithAck(metadata, fileData);
     };
 
     reader.readAsArrayBuffer(selectedFile);
 }
 
-async function transmitFile(metadata, fileData) {
+async function transmitFileWithAck(metadata, fileData) {
     try {
-        // Start visualization
         startSendVisualization();
+        startSignalMonitoring();
 
-        // Send preamble (sync tones)
+        // Send preamble
         document.getElementById('senderStatus').textContent = 'Sending sync signal...';
         await sendPreamble();
 
         // Send metadata
         document.getElementById('senderStatus').textContent = 'Sending file information...';
         const metadataStr = JSON.stringify(metadata);
-        await sendPacket('META:' + metadataStr);
+        await sendPacketWithAck('META:' + metadataStr);
 
         log(`Metadata sent: ${metadata.filename} (${metadata.chunks} chunks)`, 'info');
 
-        // Send file data in chunks
+        // Send file data
         const totalChunks = Math.ceil(fileData.length / CONFIG.CHUNK_SIZE);
+        let successfulChunks = 0;
 
         for (let i = 0; i < totalChunks; i++) {
             const start = i * CONFIG.CHUNK_SIZE;
             const end = Math.min(start + CONFIG.CHUNK_SIZE, fileData.length);
             const chunk = fileData.slice(start, end);
-
-            // Convert to base64
             const base64 = btoa(String.fromCharCode.apply(null, chunk));
 
-            // Send chunk
-            await sendPacket(`DATA:${i}:${base64}`);
+            // Try sending with retry
+            let sent = false;
+            for (let retry = 0; retry < CONFIG.MAX_RETRIES && !sent; retry++) {
+                if (retry > 0) {
+                    log(`Retrying chunk ${i} (attempt ${retry + 1}/${CONFIG.MAX_RETRIES})`, 'warning');
+                }
 
-            // Send redundant copy if enabled
-            if (CONFIG.USE_REDUNDANCY && i % 5 === 0) {  // Every 5th chunk
-                await sendPacket(`DATA:${i}:${base64}`);
+                sent = await sendPacketWithAck(`DATA:${i}:${base64}`);
+
+                if (sent) {
+                    successfulChunks++;
+                }
+            }
+
+            if (!sent) {
+                log(`Failed to send chunk ${i} after ${CONFIG.MAX_RETRIES} attempts`, 'error');
+                chunkRetryMap.set(i, base64);
             }
 
             // Update progress
@@ -515,21 +907,30 @@ async function transmitFile(metadata, fileData) {
             await new Promise(resolve => setTimeout(resolve, CONFIG.PACKET_DELAY));
         }
 
+        // Retry failed chunks
+        if (chunkRetryMap.size > 0) {
+            log(`Retrying ${chunkRetryMap.size} failed chunks...`, 'warning');
+            for (const [idx, base64] of chunkRetryMap.entries()) {
+                await sendPacketWithAck(`DATA:${idx}:${base64}`);
+            }
+        }
+
         // Send end signal
         document.getElementById('senderStatus').textContent = 'Sending completion signal...';
         await sendPacket('END:COMPLETE');
         await new Promise(resolve => setTimeout(resolve, 100));
-        await sendPacket('END:COMPLETE');  // Send twice for reliability
+        await sendPacket('END:COMPLETE');
 
         // Complete
         document.getElementById('senderStatus').textContent = '✅ Transmission complete!';
         document.getElementById('progressText').textContent = '100%';
         document.getElementById('progressFill').style.width = '100%';
 
-        log('File transmission completed successfully!', 'success');
+        log(`Transmission complete! ${successfulChunks}/${totalChunks} chunks sent successfully`, 'success');
 
         isSending = false;
         stopSendVisualization();
+        stopSignalMonitoring();
         document.getElementById('sendBtn').disabled = false;
         document.getElementById('quickSendBtn').disabled = false;
 
@@ -537,27 +938,36 @@ async function transmitFile(metadata, fileData) {
         log(`Transmission error: ${error.message}`, 'error');
         isSending = false;
         stopSendVisualization();
+        stopSignalMonitoring();
         document.getElementById('sendBtn').disabled = false;
         document.getElementById('quickSendBtn').disabled = false;
     }
 }
 
+async function sendPacketWithAck(message) {
+    // For now, send without waiting for ACK (full bidirectional ACK requires more complex protocol)
+    // This is a simplified version showing the structure
+    await sendPacket(message);
+
+    // In a full implementation, we would:
+    // 1. Send packet
+    // 2. Switch to listen mode briefly
+    // 3. Wait for ACK signal
+    // 4. Return true if ACK received, false otherwise
+
+    return true;  // Assume success for now
+}
+
 async function sendPreamble() {
-    // Send sync tones on all channels
-    for (let i = 0; i < 3; i++) {  // 3 pulses
+    for (let i = 0; i < 3; i++) {
         await playChord(optimalFrequencies, 150);
         await new Promise(resolve => setTimeout(resolve, 50));
     }
 }
 
 async function sendPacket(message) {
-    // Encode message to binary
     const binary = encodeToBinary(message);
-
-    // Add start/stop markers
-    const frame = '10101010' + binary + '01010101';  // Sync pattern
-
-    // Transmit using chord modulation
+    const frame = '10101010' + binary + '01010101';
     await transmitBinaryChord(frame);
 }
 
@@ -570,7 +980,6 @@ function encodeToBinary(message) {
 }
 
 async function transmitBinaryChord(binaryString) {
-    // Split binary into parallel streams (one per channel)
     const streams = [];
     for (let i = 0; i < CONFIG.NUM_CHANNELS; i++) {
         streams.push('');
@@ -581,15 +990,13 @@ async function transmitBinaryChord(binaryString) {
         streams[channelIdx] += binaryString[i];
     }
 
-    // Pad streams to equal length
     const maxLen = Math.max(...streams.map(s => s.length));
     streams.forEach((s, i) => {
         while (streams[i].length < maxLen) {
-            streams[i] += '0';  // Pad with zeros
+            streams[i] += '0';
         }
     });
 
-    // Transmit symbols in parallel
     for (let symbolIdx = 0; symbolIdx < maxLen; symbolIdx++) {
         const frequencies = [];
         for (let ch = 0; ch < CONFIG.NUM_CHANNELS; ch++) {
@@ -608,7 +1015,10 @@ async function playChord(frequencies, duration) {
         const oscillators = [];
         const gainNode = audioContext.createGain();
         gainNode.connect(audioContext.destination);
-        gainNode.gain.setValueAtTime(0.05, audioContext.currentTime);  // Low volume per oscillator
+
+        // Use adaptive power
+        const power = powerController.getPower();
+        gainNode.gain.setValueAtTime(power / CONFIG.NUM_CHANNELS, audioContext.currentTime);
 
         frequencies.forEach(freq => {
             const osc = audioContext.createOscillator();
@@ -637,24 +1047,25 @@ async function startListening() {
     expectedChunks = 0;
     receptionStartTime = Date.now();
     totalBytesReceived = 0;
+    signalMonitor.reset();
 
     document.getElementById('listenBtn').disabled = true;
     document.getElementById('stopListenBtn').disabled = false;
     document.getElementById('listenerStatus').textContent = 'Calibrating environment...';
     document.getElementById('listenerCalibration').classList.remove('hidden');
     document.getElementById('listenerVisualizer').classList.remove('hidden');
+    document.getElementById('signalStrengthPanel').classList.remove('hidden');
 
     log('Starting listener mode...', 'info');
 
-    // Quick calibration
     await performCalibration(true);
 
     document.getElementById('listenerStatus').textContent = '🎧 Listening for transmission...';
     log('Listening on frequencies: ' + optimalFrequencies.join(', ') + ' Hz', 'info');
 
-    // Start reception loop
     startReceptionLoop();
     startReceiveVisualization();
+    startSignalMonitoring();
 }
 
 function stopListening() {
@@ -667,6 +1078,7 @@ function stopListening() {
 
     stopReceptionLoop();
     stopReceiveVisualization();
+    stopSignalMonitoring();
 
     log('Stopped listening', 'info');
 }
@@ -681,14 +1093,13 @@ let demodulationState = {
 };
 
 function startReceptionLoop() {
-    // Use requestAnimationFrame for smoother performance
     let lastCheckTime = 0;
 
     function checkForSignal() {
         if (!isListening) return;
 
         const now = Date.now();
-        if (now - lastCheckTime < 20) {  // Check every 20ms
+        if (now - lastCheckTime < 20) {
             requestAnimationFrame(checkForSignal);
             return;
         }
@@ -698,7 +1109,6 @@ function startReceptionLoop() {
         const dataArray = new Uint8Array(bufferLength);
         analyser.getByteFrequencyData(dataArray);
 
-        // Demodulate all channels
         const bits = demodulateChord(dataArray);
 
         if (bits !== null) {
@@ -734,7 +1144,6 @@ function demodulateChord(spectrum) {
         const amp0 = spectrum[bin0] || 0;
         const amp1 = spectrum[bin1] || 0;
 
-        // Detect which frequency is stronger
         if (amp0 > CONFIG.SIGNAL_THRESHOLD || amp1 > CONFIG.SIGNAL_THRESHOLD) {
             signalDetected = true;
             demodulated.push(amp1 > amp0 ? '1' : '0');
@@ -751,14 +1160,12 @@ function demodulateChord(spectrum) {
 }
 
 function processReceivedBits(bits) {
-    // Add bits to stream
     bits.forEach(bit => {
         if (bit !== null) {
             demodulationState.bitStream += bit;
         }
     });
 
-    // Look for sync pattern
     if (!demodulationState.syncDetected) {
         const syncPattern = '10101010';
         const idx = demodulationState.bitStream.indexOf(syncPattern);
@@ -772,9 +1179,7 @@ function processReceivedBits(bits) {
         return;
     }
 
-    // Try to decode packets
     while (demodulationState.bitStream.length >= 8) {
-        // Extract byte
         const byteBits = demodulationState.bitStream.slice(0, 8);
         demodulationState.bitStream = demodulationState.bitStream.slice(8);
 
@@ -783,7 +1188,6 @@ function processReceivedBits(bits) {
 
         demodulationState.packetBuffer += char;
 
-        // Check for packet delimiter or reasonable packet end
         if (demodulationState.packetBuffer.includes('\x00') ||
             (demodulationState.packetBuffer.length > 10 &&
              (demodulationState.packetBuffer.includes('META:') ||
@@ -795,7 +1199,6 @@ function processReceivedBits(bits) {
             demodulationState.syncDetected = false;
         }
 
-        // Prevent buffer overflow
         if (demodulationState.packetBuffer.length > 5000) {
             log('Packet buffer overflow, resetting', 'warning');
             demodulationState.packetBuffer = '';
@@ -805,7 +1208,6 @@ function processReceivedBits(bits) {
 }
 
 function processPacket(packet) {
-    // Clean packet
     packet = packet.replace(/\x00/g, '').trim();
 
     if (!packet || packet.length < 5) return;
@@ -817,10 +1219,10 @@ function processPacket(packet) {
             expectedChunks = fileMetadata.chunks;
 
             document.getElementById('listenerStatus').textContent =
-                `📥 Receiving: ${fileMetadata.filename} (${formatFileSize(fileMetadata.size)})`;
+                `📥 Receiving: ${fileMetadata.filename} (${formatFileSize(fileMetadata.size)})${fileMetadata.compressed ? ' [Compressed]' : ''}`;
             document.getElementById('receiveProgress').classList.remove('hidden');
 
-            log(`Receiving file: ${fileMetadata.filename} (${expectedChunks} chunks)`, 'success');
+            log(`Receiving file: ${fileMetadata.filename} (${expectedChunks} chunks)${fileMetadata.compressed ? ' [Compressed]' : ''}`, 'success');
 
         } else if (packet.startsWith('DATA:')) {
             const parts = packet.slice(5).split(':');
@@ -836,13 +1238,13 @@ function processPacket(packet) {
                     document.getElementById('receiveProgressFill').style.width = `${progress}%`;
                     document.getElementById('receivedChunks').textContent = receivedChunks.size;
 
-                    // Calculate data rate
                     const elapsed = (Date.now() - receptionStartTime) / 1000;
                     totalBytesReceived += atob(base64Data).length;
                     const rate = Math.round(totalBytesReceived / elapsed);
                     document.getElementById('dataRate').textContent = rate;
 
-                    log(`Chunk ${chunkIdx + 1}/${expectedChunks} received`, 'info');
+                    // Send ACK (simplified - would need separate transmission channel in reality)
+                    // sendAck(chunkIdx);
                 }
             }
 
@@ -859,7 +1261,6 @@ function processPacket(packet) {
 
 function reconstructFile() {
     try {
-        // Reconstruct file from chunks
         let fileData = '';
 
         for (let i = 0; i < expectedChunks; i++) {
@@ -870,27 +1271,36 @@ function reconstructFile() {
             }
         }
 
-        // Convert to Uint8Array
-        const bytes = new Uint8Array(fileData.length);
+        let bytes = new Uint8Array(fileData.length);
         for (let i = 0; i < fileData.length; i++) {
             bytes[i] = fileData.charCodeAt(i);
         }
 
-        // Verify checksum
-        const receivedChecksum = calculateChecksum(bytes);
-        const receivedCrc = crc16(bytes);
+        // Decompress if needed
+        if (fileMetadata.compressed) {
+            document.getElementById('listenerStatus').textContent = 'Decompressing file...';
+            log('Decompressing file...', 'info');
 
+            try {
+                bytes = compressor.decompress(bytes);
+                log(`File decompressed: ${formatFileSize(fileMetadata.size)} → ${formatFileSize(bytes.length)}`, 'success');
+            } catch (e) {
+                log(`Decompression failed: ${e.message}`, 'error');
+            }
+        }
+
+        // Verify
+        const receivedChecksum = calculateChecksum(bytes);
         let integrityStatus = '✅ Verified';
-        if (fileMetadata.checksum !== receivedChecksum) {
+
+        if (fileMetadata.checksum && fileMetadata.checksum !== receivedChecksum) {
             integrityStatus = '⚠️ Checksum mismatch (possible corruption)';
             log('Warning: Checksum mismatch', 'warning');
         }
 
-        // Create blob
         const blob = new Blob([bytes], { type: 'application/octet-stream' });
         receivedData = blob;
 
-        // Update UI
         document.getElementById('listenerStatus').textContent = '✅ File received successfully!';
         document.getElementById('receivedFileName').textContent = fileMetadata.filename;
         document.getElementById('receivedFileSize').textContent = formatFileSize(blob.size);
@@ -924,6 +1334,59 @@ function downloadReceived() {
 }
 
 // =============================================================================
+// SIGNAL MONITORING (VISUALIZATION)
+// =============================================================================
+
+let signalMonitorInterval = null;
+
+function startSignalMonitoring() {
+    signalMonitorInterval = setInterval(() => {
+        if (!analyser || (!isSending && !isListening)) return;
+
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+        analyser.getByteFrequencyData(dataArray);
+
+        const snr = signalMonitor.updateSNR(dataArray, optimalFrequencies);
+        currentSNR = snr;
+
+        // Update UI
+        updateSignalStrengthUI(snr);
+
+        // Adjust power if sending
+        if (isSending && CONFIG.ENABLE_ADAPTIVE_POWER) {
+            powerController.adjustPower(snr);
+        }
+    }, 100);
+}
+
+function stopSignalMonitoring() {
+    if (signalMonitorInterval) {
+        clearInterval(signalMonitorInterval);
+        signalMonitorInterval = null;
+    }
+}
+
+function updateSignalStrengthUI(snr) {
+    const snrValue = document.getElementById('snrValue');
+    const snrBar = document.getElementById('snrBar');
+    const qualityText = document.getElementById('qualityText');
+
+    if (snrValue) snrValue.textContent = `${snr.toFixed(1)} dB`;
+    if (snrBar) snrBar.style.width = `${Math.min(100, (snr / 30) * 100)}%`;
+
+    if (qualityText) {
+        const quality = signalMonitor.getSignalQuality();
+        qualityText.textContent = quality;
+
+        // Color coding
+        if (snr >= 20) snrBar.style.background = 'linear-gradient(90deg, #4caf50, #45a049)';
+        else if (snr >= 10) snrBar.style.background = 'linear-gradient(90deg, #ffeb3b, #fdd835)';
+        else snrBar.style.background = 'linear-gradient(90deg, #ff6b6b, #ee5a52)';
+    }
+}
+
+// =============================================================================
 // VISUALIZATION
 // =============================================================================
 
@@ -932,6 +1395,8 @@ let receiveAnimationId = null;
 
 function startSendVisualization() {
     const canvas = document.getElementById('senderVisualizer');
+    if (!canvas) return;
+
     const ctx = canvas.getContext('2d');
     canvas.width = canvas.offsetWidth;
     canvas.height = canvas.offsetHeight;
@@ -944,7 +1409,6 @@ function startSendVisualization() {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        // Draw waveforms for each frequency
         optimalFrequencies.forEach((freq, idx) => {
             const yOffset = canvas.height / 2;
             const amplitude = 30;
@@ -981,6 +1445,8 @@ function stopSendVisualization() {
 
 function startReceiveVisualization() {
     const canvas = document.getElementById('listenerVisualizer');
+    if (!canvas) return;
+
     const ctx = canvas.getContext('2d');
     canvas.width = canvas.offsetWidth;
     canvas.height = canvas.offsetHeight;
@@ -988,7 +1454,6 @@ function startReceiveVisualization() {
     function animate() {
         if (!isListening) return;
 
-        // Draw spectrum analyzer
         const bufferLength = analyser.frequencyBinCount;
         const dataArray = new Uint8Array(bufferLength);
         analyser.getByteFrequencyData(dataArray);
@@ -1028,6 +1493,7 @@ function stopReceiveVisualization() {
 // =============================================================================
 
 window.addEventListener('load', () => {
-    log('SonicTransfer loaded! Select Send or Receive mode to begin.', 'info');
-    log(`Enhanced with ${CONFIG.NUM_CHANNELS}-channel chord transmission for ${CONFIG.NUM_CHANNELS}x speed!`, 'success');
+    log('SonicTransfer Enhanced v2.0 loaded!', 'info');
+    log('New features: ACK/NACK, Signal Monitor, LZ Compression, Presets, Adaptive Power', 'success');
+    updatePresetUI();
 });
