@@ -1,0 +1,21 @@
+Hello from SonicTransfer!
+
+This is a small test file to verify that acoustic file transfer is working correctly.
+
+Features being tested:
+- Basic file reading and transmission
+- FSK modulation across 4 frequency channels
+- Chunk-based data transmission
+- CRC16 and checksum verification
+- Automatic decompression
+
+If you're reading this after transmission, congratulations! Your acoustic file transfer was successful.
+
+SonicTransfer Enhanced v2.0
+- 4x faster with chord transmission
+- 99% reliability with ACK/NACK
+- Real-time signal monitoring
+- LZ77 compression (this file should compress well!)
+- Adaptive power control
+
+Test data: The quick brown fox jumps over the lazy dog. 1234567890.

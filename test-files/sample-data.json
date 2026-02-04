@@ -1,0 +1,85 @@
+{
+  "project": "SonicTransfer",
+  "version": "2.0.0",
+  "description": "Acoustic file transfer using sound waves",
+  "features": [
+    {
+      "name": "Chord Transmission",
+      "channels": 4,
+      "speedImprovement": "4x",
+      "enabled": true
+    },
+    {
+      "name": "LZ77 Compression",
+      "algorithm": "LZ77",
+      "windowSize": 4096,
+      "compressionRatio": "40-60%",
+      "enabled": true
+    },
+    {
+      "name": "Signal Monitor",
+      "type": "Real-time SNR",
+      "updateInterval": 100,
+      "historySize": 50,
+      "enabled": true
+    },
+    {
+      "name": "Adaptive Power",
+      "minPower": 0.03,
+      "maxPower": 0.15,
+      "targetSNR": 15,
+      "enabled": true
+    },
+    {
+      "name": "Calibration Presets",
+      "storage": "localStorage",
+      "environmentDetection": true,
+      "enabled": true
+    }
+  ],
+  "performance": {
+    "chunkSuccessRate": 0.99,
+    "transferSpeed": {
+      "text": 500,
+      "binary": 380,
+      "unit": "bytes/sec"
+    },
+    "calibrationTime": {
+      "quick": 2,
+      "full": 3,
+      "preset": 0,
+      "unit": "seconds"
+    }
+  },
+  "technicalSpecs": {
+    "frequencyRange": {
+      "min": 2000,
+      "max": 10000,
+      "unit": "Hz"
+    },
+    "channels": 4,
+    "channelSpacing": 400,
+    "fskDeviation": 100,
+    "symbolDuration": 40,
+    "chunkSize": 64,
+    "fftSize": 8192
+  },
+  "testResults": {
+    "reliability": "99%",
+    "compressionRatioText": "56%",
+    "compressionRatioJSON": "48%",
+    "speedImprovementVsV1": "67%",
+    "setupTimeReduction": "100%"
+  },
+  "compatibility": [
+    "Chrome 60+",
+    "Firefox 55+",
+    "Safari 14+",
+    "Edge 79+"
+  ],
+  "metadata": {
+    "testFile": true,
+    "purpose": "Demonstrate JSON compression and transmission",
+    "note": "This file should compress well due to repetitive structure"
+  }
+}
