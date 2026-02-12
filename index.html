@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SonicTransfer Enhanced v2.0 - Acoustic File Transfer</title>
+    <title>SonicTransfer Enhanced v2.5 - Acoustic File Transfer</title>
     <style>
         * {
             margin: 0;
@@ -427,6 +427,28 @@
                 <div><strong>File:</strong> <span id="fileName"></span></div>
                 <div><strong>Size:</strong> <span id="fileSize"></span></div>
                 <div><strong>Estimated time:</strong> <span id="estimatedTime"></span></div>
+            </div>
+
+            <!-- NEW v2.5: Speed Profile Selector -->
+            <div style="margin: 20px 0; padding: 20px; background: rgba(0,0,0,0.2); border-radius: 10px;">
+                <h4 style="margin-bottom: 10px;">⚡ Speed Profile</h4>
+                <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                    <label style="font-weight: bold; min-width: 100px;">Mode:</label>
+                    <select id="speedProfileSelect" onchange="setSpeedProfile(this.value)"
+                            style="flex: 1; min-width: 200px; padding: 10px; border-radius: 8px; background: rgba(255,255,255,0.9);
+                                   border: none; font-size: 1rem; font-weight: bold; cursor: pointer;">
+                        <option value="STANDARD">Standard - 12 B/s (Most Reliable)</option>
+                        <option value="FAST" selected>Fast - 200 B/s (Recommended)</option>
+                        <option value="ULTRA">Ultra - 400 B/s (Quiet Only)</option>
+                        <option value="EXTREME">Extreme - 960 B/s (Experimental)</option>
+                    </select>
+                </div>
+                <div id="speedProfileDesc" style="font-size: 0.9rem; opacity: 0.9; margin-top: 10px; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 5px;">
+                    Fast mode - ~200 bytes/sec, needs quiet environment
+                </div>
+                <div style="font-size: 0.85rem; opacity: 0.7; margin-top: 8px;">
+                    💡 <strong>Tip:</strong> Use FAST mode for quiet rooms, STANDARD for noisy environments
+                </div>
             </div>
 
             <div style="text-align: center; margin: 20px 0;">

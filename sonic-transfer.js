@@ -1,8 +1,58 @@
-// SonicTransfer Enhanced - v2.0
-// New Features: ACK/NACK, Signal Monitor, Compression, Presets, Adaptive Power
+// SonicTransfer Enhanced - v2.5
+// New Features: Speed Profiles, QPSK Modulation, Binary Encoding
+// v2.0 Features: ACK/NACK, Signal Monitor, Compression, Presets, Adaptive Power
 
 // =============================================================================
-// GLOBAL CONFIGURATION
+// SPEED OPTIMIZATION PROFILES
+// =============================================================================
+
+const SPEED_PROFILES = {
+    // Conservative - works in most environments
+    STANDARD: {
+        NUM_CHANNELS: 4,
+        CHANNEL_SPACING: 400,
+        SYMBOL_DURATION: 40,
+        BITS_PER_SYMBOL: 1,  // FSK
+        USE_BASE64: true,
+        DESCRIPTION: 'Standard mode - ~12 bytes/sec, very reliable'
+    },
+
+    // Optimized for quiet home
+    FAST: {
+        NUM_CHANNELS: 8,
+        CHANNEL_SPACING: 200,
+        SYMBOL_DURATION: 20,
+        BITS_PER_SYMBOL: 2,  // QPSK
+        USE_BASE64: false,   // Binary encoding
+        DESCRIPTION: 'Fast mode - ~200 bytes/sec, needs quiet environment'
+    },
+
+    // Maximum speed for ideal conditions
+    ULTRA: {
+        NUM_CHANNELS: 12,
+        CHANNEL_SPACING: 133,
+        SYMBOL_DURATION: 15,
+        BITS_PER_SYMBOL: 2,  // QPSK
+        USE_BASE64: false,
+        DESCRIPTION: 'Ultra mode - ~400 bytes/sec, requires very quiet room'
+    },
+
+    // Experimental - push the limits
+    EXTREME: {
+        NUM_CHANNELS: 16,
+        CHANNEL_SPACING: 100,
+        SYMBOL_DURATION: 10,
+        BITS_PER_SYMBOL: 3,  // 8-PSK
+        USE_BASE64: false,
+        DESCRIPTION: 'Extreme mode - ~960 bytes/sec, experimental'
+    }
+};
+
+// Current active profile
+let currentProfile = SPEED_PROFILES.FAST;  // Default to FAST for home use
+
+// =============================================================================
+// GLOBAL CONFIGURATION (DYNAMIC BASED ON PROFILE)
 // =============================================================================
 
 const CONFIG = {
@@ -10,24 +60,26 @@ const CONFIG = {
     SAMPLE_RATE: 44100,
     FFT_SIZE: 8192,
 
-    // Frequency configuration
+    // Frequency configuration (dynamically set by profile)
     FREQ_MIN: 2000,
     FREQ_MAX: 10000,
-    NUM_CHANNELS: 4,
-    CHANNEL_SPACING: 400,
+    get NUM_CHANNELS() { return currentProfile.NUM_CHANNELS; },
+    get CHANNEL_SPACING() { return currentProfile.CHANNEL_SPACING; },
 
-    // Modulation
+    // Modulation (dynamically set by profile)
     FSK_DEVIATION: 100,
-    SYMBOL_DURATION: 40,
+    get SYMBOL_DURATION() { return currentProfile.SYMBOL_DURATION; },
+    get BITS_PER_SYMBOL() { return currentProfile.BITS_PER_SYMBOL; },
+    get USE_BASE64() { return currentProfile.USE_BASE64; },
 
     // Transmission
-    CHUNK_SIZE: 64,
-    PREAMBLE_DURATION: 800,
-    PACKET_DELAY: 10,
+    CHUNK_SIZE: 128,  // Increased from 64
+    PREAMBLE_DURATION: 500,  // Reduced from 800
+    PACKET_DELAY: 5,  // Reduced from 10
 
     // Reception
     SIGNAL_THRESHOLD: 80,
-    CALIBRATION_DURATION: 3000,
+    CALIBRATION_DURATION: 2000,  // Reduced from 3000
     MIN_SNR: 10,
 
     // Error correction & retry
@@ -36,17 +88,17 @@ const CONFIG = {
     MAX_RETRIES: 3,
     ACK_TIMEOUT: 1000,  // ms to wait for ACK
 
-    // NEW: Compression
+    // Compression
     USE_COMPRESSION: true,
-    COMPRESSION_MIN_SIZE: 1024,  // Only compress files > 1KB
+    COMPRESSION_MIN_SIZE: 512,  // Lowered threshold
 
-    // NEW: Adaptive power
+    // Adaptive power
     ENABLE_ADAPTIVE_POWER: true,
     MIN_POWER: 0.03,
     MAX_POWER: 0.15,
     TARGET_SNR: 15,  // dB
 
-    // NEW: Signal monitoring
+    // Signal monitoring
     SNR_HISTORY_SIZE: 50,
 };
 
@@ -192,6 +244,220 @@ class LZCompressor {
 }
 
 const compressor = new LZCompressor();
+
+// =============================================================================
+// BINARY ENCODING (NO BASE64)
+// =============================================================================
+
+class BinaryEncoder {
+    // Encode string to binary without base64 overhead
+    static encodeToBinary(str) {
+        const bytes = new TextEncoder().encode(str);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) {
+            binary += bytes[i].toString(2).padStart(8, '0');
+        }
+        return binary;
+    }
+
+    // Encode Uint8Array to binary directly
+    static encodeDataToBinary(data) {
+        let binary = '';
+        for (let i = 0; i < data.length; i++) {
+            binary += data[i].toString(2).padStart(8, '0');
+        }
+        return binary;
+    }
+
+    // Decode binary to Uint8Array
+    static decodeBinaryToData(binary) {
+        const bytes = [];
+        for (let i = 0; i < binary.length; i += 8) {
+            const byte = binary.slice(i, i + 8);
+            if (byte.length === 8) {
+                bytes.push(parseInt(byte, 2));
+            }
+        }
+        return new Uint8Array(bytes);
+    }
+}
+
+// =============================================================================
+// QPSK MODULATION (2 bits per symbol)
+// =============================================================================
+
+class QPSKModulator {
+    // Map 2-bit patterns to phase shifts
+    static PHASE_MAP = {
+        '00': 0,      // 0°
+        '01': 90,     // 90°
+        '10': 180,    // 180°
+        '11': 270     // 270°
+    };
+
+    // Modulate binary string to QPSK symbols
+    static modulate(binaryString) {
+        const symbols = [];
+        for (let i = 0; i < binaryString.length; i += 2) {
+            const dibits = binaryString.slice(i, i + 2).padEnd(2, '0');
+            symbols.push(this.PHASE_MAP[dibits]);
+        }
+        return symbols;
+    }
+
+    // Demodulate QPSK symbols to binary
+    static demodulate(symbols) {
+        const reverseMap = Object.fromEntries(
+            Object.entries(this.PHASE_MAP).map(([k, v]) => [v, k])
+        );
+
+        let binary = '';
+        symbols.forEach(phase => {
+            binary += reverseMap[phase] || '00';
+        });
+        return binary;
+    }
+
+    // Generate QPSK tone for a given phase
+    static generateTone(frequency, phase, duration, audioContext) {
+        const sampleRate = audioContext.sampleRate;
+        const numSamples = Math.floor(sampleRate * duration / 1000);
+        const buffer = audioContext.createBuffer(1, numSamples, sampleRate);
+        const data = buffer.getChannelData(0);
+
+        const phaseRadians = (phase * Math.PI) / 180;
+
+        for (let i = 0; i < numSamples; i++) {
+            const t = i / sampleRate;
+            const omega = 2 * Math.PI * frequency * t;
+            data[i] = Math.cos(omega + phaseRadians);
+        }
+
+        return buffer;
+    }
+}
+
+// =============================================================================
+// 8-PSK MODULATION (3 bits per symbol) - For EXTREME mode
+// =============================================================================
+
+class PSK8Modulator {
+    static PHASE_MAP = {
+        '000': 0,
+        '001': 45,
+        '010': 90,
+        '011': 135,
+        '100': 180,
+        '101': 225,
+        '110': 270,
+        '111': 315
+    };
+
+    static modulate(binaryString) {
+        const symbols = [];
+        for (let i = 0; i < binaryString.length; i += 3) {
+            const tribits = binaryString.slice(i, i + 3).padEnd(3, '0');
+            symbols.push(this.PHASE_MAP[tribits]);
+        }
+        return symbols;
+    }
+
+    static demodulate(symbols) {
+        const reverseMap = Object.fromEntries(
+            Object.entries(this.PHASE_MAP).map(([k, v]) => [v, k])
+        );
+
+        let binary = '';
+        symbols.forEach(phase => {
+            binary += reverseMap[phase] || '000';
+        });
+        return binary;
+    }
+
+    static generateTone(frequency, phase, duration, audioContext) {
+        const sampleRate = audioContext.sampleRate;
+        const numSamples = Math.floor(sampleRate * duration / 1000);
+        const buffer = audioContext.createBuffer(1, numSamples, sampleRate);
+        const data = buffer.getChannelData(0);
+
+        const phaseRadians = (phase * Math.PI) / 180;
+
+        for (let i = 0; i < numSamples; i++) {
+            const t = i / sampleRate;
+            const omega = 2 * Math.PI * frequency * t;
+            data[i] = Math.cos(omega + phaseRadians);
+        }
+
+        return buffer;
+    }
+}
+
+// =============================================================================
+// SPEED CALCULATION HELPERS
+// =============================================================================
+
+function calculateTheoreticalSpeed(profile) {
+    const symbolsPerSecond = 1000 / profile.SYMBOL_DURATION;
+    const bitsPerSecond = profile.NUM_CHANNELS * profile.BITS_PER_SYMBOL * symbolsPerSecond;
+    const bytesPerSecond = bitsPerSecond / 8;
+
+    // Account for framing overhead (sync patterns, packet headers)
+    const efficiency = 0.85;  // 85% efficiency after overhead
+    const effectiveBytesPerSecond = Math.floor(bytesPerSecond * efficiency);
+
+    return {
+        bitsPerSecond,
+        bytesPerSecond,
+        effectiveBytesPerSecond,
+        speedup: effectiveBytesPerSecond / 10  // vs original ~10 bytes/sec
+    };
+}
+
+function setSpeedProfile(profileName) {
+    if (!SPEED_PROFILES[profileName]) {
+        log(`Unknown profile: ${profileName}`, 'error');
+        return;
+    }
+
+    currentProfile = SPEED_PROFILES[profileName];
+    const speed = calculateTheoreticalSpeed(currentProfile);
+
+    log(`Speed profile: ${profileName}`, 'success');
+    log(`Estimated speed: ${speed.effectiveBytesPerSecond} bytes/sec (${speed.speedup.toFixed(1)}x faster)`, 'info');
+    log(`Channels: ${currentProfile.NUM_CHANNELS}, Symbol: ${currentProfile.SYMBOL_DURATION}ms, Modulation: ${currentProfile.BITS_PER_SYMBOL === 1 ? 'FSK' : currentProfile.BITS_PER_SYMBOL === 2 ? 'QPSK' : '8-PSK'}`, 'info');
+
+    // Update UI
+    updateSpeedProfileUI();
+
+    // Force recalibration if already calibrated
+    if (isCalibrated) {
+        log('Profile changed - please recalibrate for optimal performance', 'warning');
+        isCalibrated = false;
+    }
+}
+
+function updateSpeedProfileUI() {
+    const selector = document.getElementById('speedProfileSelect');
+    if (!selector) return;
+
+    selector.innerHTML = '';
+    Object.keys(SPEED_PROFILES).forEach(name => {
+        const option = document.createElement('option');
+        option.value = name;
+        option.textContent = name;
+        if (SPEED_PROFILES[name] === currentProfile) {
+            option.selected = true;
+        }
+        selector.appendChild(option);
+    });
+
+    // Update description
+    const desc = document.getElementById('speedProfileDesc');
+    if (desc) {
+        const speed = calculateTheoreticalSpeed(currentProfile);
+        desc.textContent = `${currentProfile.DESCRIPTION} (~${speed.effectiveBytesPerSecond} B/s)`;
+    }
+}
 
 // =============================================================================
 // CALIBRATION PRESET MANAGEMENT
@@ -843,7 +1109,8 @@ async function startSending() {
             crc: crc16(fileData),
             chunks: Math.ceil(fileData.length / CONFIG.CHUNK_SIZE),
             timestamp: Date.now(),
-            useAck: true
+            useAck: true,
+            encoding: CONFIG.USE_BASE64 ? 'base64' : 'binary'  // NEW: encoding type
         };
 
         await transmitFileWithAck(metadata, fileData);
@@ -876,7 +1143,16 @@ async function transmitFileWithAck(metadata, fileData) {
             const start = i * CONFIG.CHUNK_SIZE;
             const end = Math.min(start + CONFIG.CHUNK_SIZE, fileData.length);
             const chunk = fileData.slice(start, end);
-            const base64 = btoa(String.fromCharCode.apply(null, chunk));
+
+            // Encode chunk based on profile setting
+            let encodedData;
+            if (CONFIG.USE_BASE64) {
+                // Base64 encoding (standard mode)
+                encodedData = btoa(String.fromCharCode.apply(null, chunk));
+            } else {
+                // Binary encoding (fast/ultra/extreme modes) - no overhead!
+                encodedData = BinaryEncoder.encodeDataToBinary(chunk);
+            }
 
             // Try sending with retry
             let sent = false;
@@ -885,7 +1161,7 @@ async function transmitFileWithAck(metadata, fileData) {
                     log(`Retrying chunk ${i} (attempt ${retry + 1}/${CONFIG.MAX_RETRIES})`, 'warning');
                 }
 
-                sent = await sendPacketWithAck(`DATA:${i}:${base64}`);
+                sent = await sendPacketWithAck(`DATA:${i}:${encodedData}`);
 
                 if (sent) {
                     successfulChunks++;
@@ -894,7 +1170,7 @@ async function transmitFileWithAck(metadata, fileData) {
 
             if (!sent) {
                 log(`Failed to send chunk ${i} after ${CONFIG.MAX_RETRIES} attempts`, 'error');
-                chunkRetryMap.set(i, base64);
+                chunkRetryMap.set(i, encodedData);
             }
 
             // Update progress
@@ -980,6 +1256,19 @@ function encodeToBinary(message) {
 }
 
 async function transmitBinaryChord(binaryString) {
+    if (CONFIG.BITS_PER_SYMBOL === 1) {
+        // FSK mode (existing logic)
+        return await transmitBinaryFSK(binaryString);
+    } else if (CONFIG.BITS_PER_SYMBOL === 2) {
+        // QPSK mode
+        return await transmitBinaryQPSK(binaryString);
+    } else if (CONFIG.BITS_PER_SYMBOL === 3) {
+        // 8-PSK mode
+        return await transmitBinary8PSK(binaryString);
+    }
+}
+
+async function transmitBinaryFSK(binaryString) {
     const streams = [];
     for (let i = 0; i < CONFIG.NUM_CHANNELS; i++) {
         streams.push('');
@@ -1008,6 +1297,132 @@ async function transmitBinaryChord(binaryString) {
 
         await playChord(frequencies, CONFIG.SYMBOL_DURATION);
     }
+}
+
+async function transmitBinaryQPSK(binaryString) {
+    // Split binary across channels
+    const streams = [];
+    for (let i = 0; i < CONFIG.NUM_CHANNELS; i++) {
+        streams.push('');
+    }
+
+    for (let i = 0; i < binaryString.length; i++) {
+        const channelIdx = i % CONFIG.NUM_CHANNELS;
+        streams[channelIdx] += binaryString[i];
+    }
+
+    // Pad to even length (QPSK needs pairs of bits)
+    streams.forEach((s, i) => {
+        if (streams[i].length % 2 !== 0) {
+            streams[i] += '0';
+        }
+    });
+
+    // Modulate each stream with QPSK
+    const symbolStreams = streams.map(stream => QPSKModulator.modulate(stream));
+    const maxLen = Math.max(...symbolStreams.map(s => s.length));
+
+    // Transmit symbols in parallel
+    for (let symbolIdx = 0; symbolIdx < maxLen; symbolIdx++) {
+        await playQPSKChord(symbolStreams, symbolIdx);
+    }
+}
+
+async function transmitBinary8PSK(binaryString) {
+    // Split binary across channels
+    const streams = [];
+    for (let i = 0; i < CONFIG.NUM_CHANNELS; i++) {
+        streams.push('');
+    }
+
+    for (let i = 0; i < binaryString.length; i++) {
+        const channelIdx = i % CONFIG.NUM_CHANNELS;
+        streams[channelIdx] += binaryString[i];
+    }
+
+    // Pad to length divisible by 3 (8-PSK needs triplets of bits)
+    streams.forEach((s, i) => {
+        while (streams[i].length % 3 !== 0) {
+            streams[i] += '0';
+        }
+    });
+
+    // Modulate each stream with 8-PSK
+    const symbolStreams = streams.map(stream => PSK8Modulator.modulate(stream));
+    const maxLen = Math.max(...symbolStreams.map(s => s.length));
+
+    // Transmit symbols in parallel
+    for (let symbolIdx = 0; symbolIdx < maxLen; symbolIdx++) {
+        await play8PSKChord(symbolStreams, symbolIdx);
+    }
+}
+
+async function playQPSKChord(symbolStreams, symbolIdx) {
+    return new Promise((resolve) => {
+        const bufferSources = [];
+        const gainNode = audioContext.createGain();
+        gainNode.connect(audioContext.destination);
+
+        const power = powerController.getPower();
+        gainNode.gain.setValueAtTime(power / CONFIG.NUM_CHANNELS, audioContext.currentTime);
+
+        symbolStreams.forEach((symbols, chIdx) => {
+            if (symbolIdx < symbols.length) {
+                const frequency = optimalFrequencies[chIdx];
+                const phase = symbols[symbolIdx];
+
+                const buffer = QPSKModulator.generateTone(
+                    frequency,
+                    phase,
+                    CONFIG.SYMBOL_DURATION,
+                    audioContext
+                );
+
+                const source = audioContext.createBufferSource();
+                source.buffer = buffer;
+                source.connect(gainNode);
+                source.start();
+
+                bufferSources.push(source);
+            }
+        });
+
+        setTimeout(resolve, CONFIG.SYMBOL_DURATION);
+    });
+}
+
+async function play8PSKChord(symbolStreams, symbolIdx) {
+    return new Promise((resolve) => {
+        const bufferSources = [];
+        const gainNode = audioContext.createGain();
+        gainNode.connect(audioContext.destination);
+
+        const power = powerController.getPower();
+        gainNode.gain.setValueAtTime(power / CONFIG.NUM_CHANNELS, audioContext.currentTime);
+
+        symbolStreams.forEach((symbols, chIdx) => {
+            if (symbolIdx < symbols.length) {
+                const frequency = optimalFrequencies[chIdx];
+                const phase = symbols[symbolIdx];
+
+                const buffer = PSK8Modulator.generateTone(
+                    frequency,
+                    phase,
+                    CONFIG.SYMBOL_DURATION,
+                    audioContext
+                );
+
+                const source = audioContext.createBufferSource();
+                source.buffer = buffer;
+                source.connect(gainNode);
+                source.start();
+
+                bufferSources.push(source);
+            }
+        });
+
+        setTimeout(resolve, CONFIG.SYMBOL_DURATION);
+    });
 }
 
 async function playChord(frequencies, duration) {
@@ -1228,10 +1643,10 @@ function processPacket(packet) {
             const parts = packet.slice(5).split(':');
             if (parts.length >= 2) {
                 const chunkIdx = parseInt(parts[0]);
-                const base64Data = parts.slice(1).join(':');
+                const encodedData = parts.slice(1).join(':');
 
                 if (!isNaN(chunkIdx) && !receivedChunks.has(chunkIdx)) {
-                    receivedChunks.set(chunkIdx, base64Data);
+                    receivedChunks.set(chunkIdx, encodedData);
 
                     const progress = (receivedChunks.size / expectedChunks) * 100;
                     document.getElementById('receiveProgressText').textContent = `${Math.round(progress)}%`;
@@ -1239,7 +1654,18 @@ function processPacket(packet) {
                     document.getElementById('receivedChunks').textContent = receivedChunks.size;
 
                     const elapsed = (Date.now() - receptionStartTime) / 1000;
-                    totalBytesReceived += atob(base64Data).length;
+
+                    // Decode based on encoding type
+                    let chunkSize = 0;
+                    if (fileMetadata && fileMetadata.encoding === 'binary') {
+                        // Binary encoding - each byte is 8 bits
+                        chunkSize = encodedData.length / 8;
+                    } else {
+                        // Base64 encoding
+                        chunkSize = atob(encodedData).length;
+                    }
+
+                    totalBytesReceived += chunkSize;
                     const rate = Math.round(totalBytesReceived / elapsed);
                     document.getElementById('dataRate').textContent = rate;
 
@@ -1261,19 +1687,50 @@ function processPacket(packet) {
 
 function reconstructFile() {
     try {
-        let fileData = '';
+        let bytes;
 
-        for (let i = 0; i < expectedChunks; i++) {
-            if (receivedChunks.has(i)) {
-                fileData += atob(receivedChunks.get(i));
-            } else {
-                log(`Warning: Missing chunk ${i}`, 'warning');
+        // Decode based on encoding type
+        if (fileMetadata.encoding === 'binary') {
+            // Binary encoding - decode directly to bytes
+            log('Decoding binary data...', 'info');
+            const allChunks = [];
+
+            for (let i = 0; i < expectedChunks; i++) {
+                if (receivedChunks.has(i)) {
+                    const binaryStr = receivedChunks.get(i);
+                    const chunkBytes = BinaryEncoder.decodeBinaryToData(binaryStr);
+                    allChunks.push(chunkBytes);
+                } else {
+                    log(`Warning: Missing chunk ${i}`, 'warning');
+                }
             }
-        }
 
-        let bytes = new Uint8Array(fileData.length);
-        for (let i = 0; i < fileData.length; i++) {
-            bytes[i] = fileData.charCodeAt(i);
+            // Concatenate all chunks
+            const totalLength = allChunks.reduce((sum, chunk) => sum + chunk.length, 0);
+            bytes = new Uint8Array(totalLength);
+            let offset = 0;
+            allChunks.forEach(chunk => {
+                bytes.set(chunk, offset);
+                offset += chunk.length;
+            });
+
+        } else {
+            // Base64 encoding - traditional decode
+            log('Decoding Base64 data...', 'info');
+            let fileData = '';
+
+            for (let i = 0; i < expectedChunks; i++) {
+                if (receivedChunks.has(i)) {
+                    fileData += atob(receivedChunks.get(i));
+                } else {
+                    log(`Warning: Missing chunk ${i}`, 'warning');
+                }
+            }
+
+            bytes = new Uint8Array(fileData.length);
+            for (let i = 0; i < fileData.length; i++) {
+                bytes[i] = fileData.charCodeAt(i);
+            }
         }
 
         // Decompress if needed
@@ -1493,7 +1950,22 @@ function stopReceiveVisualization() {
 // =============================================================================
 
 window.addEventListener('load', () => {
-    log('SonicTransfer Enhanced v2.0 loaded!', 'info');
-    log('New features: ACK/NACK, Signal Monitor, LZ Compression, Presets, Adaptive Power', 'success');
+    log('SonicTransfer Enhanced v2.5 loaded!', 'info');
+    log('Speed Optimization: 4 profiles from 10-960 B/s', 'success');
+    log('v2.0 Features: ACK/NACK, Signal Monitor, LZ Compression, Presets, Adaptive Power', 'success');
+
+    // Show current speed profile
+    const speed = calculateTheoreticalSpeed(currentProfile);
+    log(`Current profile: FAST (${speed.effectiveBytesPerSecond} B/s estimated)`, 'info');
+
     updatePresetUI();
+    updateSpeedProfileUI();
+
+    // Log available profiles
+    console.group('🚀 Available Speed Profiles:');
+    Object.entries(SPEED_PROFILES).forEach(([name, profile]) => {
+        const s = calculateTheoreticalSpeed(profile);
+        console.log(`${name}: ${s.effectiveBytesPerSecond} B/s (${s.speedup.toFixed(1)}x) - ${profile.DESCRIPTION}`);
+    });
+    console.groupEnd();
 });

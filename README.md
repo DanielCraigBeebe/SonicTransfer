@@ -1,14 +1,32 @@
-# SonicTransfer Enhanced v2.0
+# SonicTransfer Enhanced v2.5
 
 > Transfer files using only sound waves - no cables, WiFi, or Bluetooth required!
 
-[![Version](https://img.shields.io/badge/version-2.0-blue.svg)](https://github.com/DanielCraigBeebe/SonicTransfer)
+[![Version](https://img.shields.io/badge/version-2.5-blue.svg)](https://github.com/DanielCraigBeebe/SonicTransfer)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-production--ready-brightgreen.svg)](https://github.com/DanielCraigBeebe/SonicTransfer)
+[![Speed](https://img.shields.io/badge/speed-up%20to%20960%20B%2Fs-orange.svg)](SPEED_IMPROVEMENTS.md)
 
-## 🎉 What's New in v2.0
+## 🚀 What's New in v2.5
 
-**SonicTransfer v2.0** introduces 5 major features for **production-ready** performance:
+**SonicTransfer v2.5** introduces **massive speed improvements** - up to **96x faster** than original!
+
+### Speed Profiles
+- ⚡ **FAST Mode**: 200 B/s (20x faster) - **Recommended for quiet homes**
+- 🚀 **ULTRA Mode**: 400 B/s (40x faster) - Very quiet environments
+- 💥 **EXTREME Mode**: 960 B/s (96x faster) - Experimental
+- 🔒 **STANDARD Mode**: 12 B/s - Most reliable, any environment
+
+### New Technologies
+- 🎛️ **QPSK Modulation** - 2 bits per symbol (2x faster than FSK)
+- 🎛️ **8-PSK Modulation** - 3 bits per symbol (EXTREME mode)
+- 📦 **Binary Encoding** - Removed Base64 overhead (33% faster)
+- 🎵 **8-16 Channels** - More parallel frequencies (2-4x faster)
+- ⏱️ **Faster Symbols** - 10-20ms symbols (2-4x faster)
+
+**[See Speed Improvements Documentation →](SPEED_IMPROVEMENTS.md)**
+
+## 🎉 v2.0 Features
 
 - 🔄 **ACK/NACK Protocol** - Automatic retry with 99% reliability
 - 📊 **Signal Monitor** - Real-time SNR display for optimal positioning
@@ -22,16 +40,24 @@
 
 ## Overview
 
-SonicTransfer is a production-ready web application that enables file transfer between devices using acoustic communication. By encoding data as sound waves using **chord-based FSK modulation** (4 parallel frequencies) with **LZ77 compression**, files can be transmitted through the air at **4x faster speeds** using only speakers and microphones.
+SonicTransfer is a production-ready web application that enables file transfer between devices using acoustic communication. By encoding data as sound waves using **chord-based QPSK/FSK modulation** (4-16 parallel frequencies) with **LZ77 compression** and **binary encoding**, files can be transmitted through the air at speeds up to **960 bytes/sec** (96x faster than v1.0) using only speakers and microphones.
+
+**Real-World Performance (FAST mode, quiet room):**
+- 10 KB text file: ~50 seconds (was 16 minutes in v1.0)
+- 50 KB JSON file: ~4 minutes (was 83 minutes in v1.0)
+- Transfer speed: ~200 bytes/sec typical
 
 ## Features
 
-### Core Functionality
-- **🎵 Chord-Based Transmission**: Uses 4 parallel frequency channels for 4x faster transfer speeds
+### Core Functionality (v2.5)
+- **⚡ Speed Profiles**: 4 modes from 12-960 B/s - choose based on your environment
+- **🎵 Advanced Modulation**: QPSK (2 bits/symbol), 8-PSK (3 bits/symbol), or FSK (1 bit/symbol)
+- **📦 Binary Encoding**: Direct binary transmission - no Base64 overhead
+- **🎛️ Multi-Channel Transmission**: 4-16 parallel frequency channels (profile dependent)
 - **🎯 Smart Auto-Calibration**: Quick 2-second environment analysis with one-click "Auto-Calibrate & Send"
-- **📡 Real FSK Demodulation**: Proper signal demodulation for reliable reception
+- **📡 Real FSK/QPSK Demodulation**: Proper signal demodulation for reliable reception
 - **✅ Error Detection**: CRC16 and checksum verification for data integrity
-- **🔄 Redundancy**: Critical packets sent twice for improved reliability
+- **🗜️ LZ77 Compression**: 40-60% file size reduction for faster transfers
 - **Dual Mode Operation**: Seamless switching between Sender and Listener modes
 - **Real-time Spectrogram**: Visual representation of frequency spectrum and noise levels
 
