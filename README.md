@@ -6,15 +6,15 @@
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-production--ready-brightgreen.svg)](https://github.com/DanielCraigBeebe/SonicTransfer)
 
-## 🎉 What's New in v2.0
+## What's New in v2.0
 
 **SonicTransfer v2.0** introduces 5 major features for **production-ready** performance:
 
-- 🔄 **ACK/NACK Protocol** - Automatic retry with 99% reliability
-- 📊 **Signal Monitor** - Real-time SNR display for optimal positioning
-- 🗜️ **LZ Compression** - 40-60% smaller files, 67% faster transfers
-- 💾 **Calibration Presets** - Save/load settings, skip calibration
-- ⚡ **Adaptive Power** - Auto-adjust volume for any environment
+-  **ACK/NACK Protocol** - Automatic retry with 99% reliability
+-  **Signal Monitor** - Real-time SNR display for optimal positioning
+-  **LZ Compression** - 40-60% smaller files, 67% faster transfers
+-  **Calibration Presets** - Save/load settings, skip calibration
+-  **Adaptive Power** - Auto-adjust volume for any environment
 
 **[See v2.0 Features Documentation →](FEATURES_V2.md)**
 
@@ -27,11 +27,11 @@ SonicTransfer is a production-ready web application that enables file transfer b
 ## Features
 
 ### Core Functionality
-- **🎵 Chord-Based Transmission**: Uses 4 parallel frequency channels for 4x faster transfer speeds
-- **🎯 Smart Auto-Calibration**: Quick 2-second environment analysis with one-click "Auto-Calibrate & Send"
-- **📡 Real FSK Demodulation**: Proper signal demodulation for reliable reception
-- **✅ Error Detection**: CRC16 and checksum verification for data integrity
-- **🔄 Redundancy**: Critical packets sent twice for improved reliability
+- ** Chord-Based Transmission**: Uses 4 parallel frequency channels for 4x faster transfer speeds
+- ** Smart Auto-Calibration**: Quick 2-second environment analysis with one-click "Auto-Calibrate & Send"
+- ** Real FSK Demodulation**: Proper signal demodulation for reliable reception
+- ** Error Detection**: CRC16 and checksum verification for data integrity
+- ** Redundancy**: Critical packets sent twice for improved reliability
 - **Dual Mode Operation**: Seamless switching between Sender and Listener modes
 - **Real-time Spectrogram**: Visual representation of frequency spectrum and noise levels
 
@@ -82,7 +82,7 @@ SonicTransfer is a production-ready web application that enables file transfer b
    - Reconstructs file from received chunks
    - Verifies integrity using CRC16 and checksum
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Choose Your Version
 
@@ -105,11 +105,11 @@ SonicTransfer is a production-ready web application that enables file transfer b
    - Browser will request microphone permissions
    - Required for both sending and receiving
 
-### Sending Files (Quick Method) ⚡
+### Sending Files (Quick Method)
 
-1. Click **"📤 Send File"** mode button
+1. Click **" Send File"** mode button
 2. Drag and drop a file (or click to browse)
-3. Click **"🚀 Auto-Calibrate & Send"**
+3. Click **" Auto-Calibrate & Send"**
 4. Keep devices close together (within 1 meter)
 5. Wait for transmission to complete
 
@@ -117,20 +117,20 @@ That's it! The system will automatically calibrate and start sending.
 
 ### Sending Files (Manual Method)
 
-1. Click **"📤 Send File"** mode button
-2. Click **"🎯 Manual Calibration"** to analyze environment (3 seconds)
+1. Click **" Send File"** mode button
+2. Click **" Manual Calibration"** to analyze environment (3 seconds)
 3. Drag and drop a file (or click to browse)
 4. Click **"📡 Send Now"**
 5. Keep devices close together during transmission
 
 ### Receiving Files
 
-1. Click **"📥 Receive File"** mode button
-2. Click **"🎧 Start Listening"**
+1. Click **" Receive File"** mode button
+2. Click **" Start Listening"**
 3. System automatically calibrates and waits for transmission
 4. Position device close to sender's speaker
 5. Monitor progress and signal quality
-6. Click **"💾 Download File"** when reception completes
+6. Click **" Download File"** when reception completes
 
 The system will show real-time statistics:
 - **Chunks Received**: Number of data chunks successfully decoded
@@ -187,7 +187,7 @@ Requires a modern browser with support for:
 - Safari 14+
 - Edge 79+
 
-## What's New in Enhanced Version 🚀
+## What's New in Enhanced Version 
 
 ### Major Improvements
 - **4x Faster Transfer**: Chord-based transmission using 4 parallel frequency channels
@@ -233,9 +233,9 @@ Requires a modern browser with support for:
 
 Potential improvements for production implementation:
 
-- [x] ~~Full FSK demodulation and decoding~~ ✅ Implemented!
-- [x] ~~Error detection (CRC, checksum)~~ ✅ Implemented!
-- [x] ~~Multi-frequency transmission~~ ✅ Implemented with chord modulation!
+- [x] ~~Full FSK demodulation and decoding~~  Implemented!
+- [x] ~~Error detection (CRC, checksum)~~  Implemented!
+- [x] ~~Multi-frequency transmission~~  Implemented with chord modulation!
 - [ ] Advanced error correction (Reed-Solomon FEC)
 - [ ] Encryption and authentication (AES)
 - [ ] Higher modulation schemes (QPSK, 8-PSK)
